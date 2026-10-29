@@ -1,542 +1,383 @@
 <?php
+session_start();
 
-require_once "conexion.php";
-
-// usuario y rol que llegan por la url
-$usuario = trim((string) ($_GET["usuario"] ?? ""));
-$cargo = (string) ($_GET["rol"] ?? "");
-
-if ($usuario === "" || ($cargo !== "1" && $cargo !== "2")) {
-    header("Location: index.html");
+// Solo el administrador (cargo 1) puede entrar aquí
+if (!isset($_SESSION["usuario"]) || $_SESSION["cargo"] != "1") {
+    header("Location: menu.php");
     exit();
 }
 
-// se agregan a los enlaces para no perder la sesion
-$parametros = "usuario=" . urlencode($usuario) . "&rol=" . urlencode($cargo);
-$parametrosHtml = htmlspecialchars($parametros, ENT_QUOTES, "UTF-8");
 
-// el rol 1 es administrador
-$esAdministrador = ($cargo === "1");
+    include("conexion.php");
 
-// revisa la conexion a la base de datos
-if (!isset($conn) && isset($conexion)) {
-    $conn = $conexion;
-}
+    // compatibilidad con la variable de conexion
 
-if (!isset($conn) || !($conn instanceof mysqli)) {
-    die("Error: No hay conexión válida con la base de datos.");
-}
+    if (!isset($conn) && isset($conexion)) {
+        $conn = $conexion;
+    }
 
-mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
-$conn->set_charset("utf8mb4");
+    $mensaje = "";
+    $proveedor_editar = null;
+    $busqueda = "";
 
-// evita que el texto rompa el html
-function h($valor) {
-    return htmlspecialchars((string)$valor, ENT_QUOTES, "UTF-8");
-}
+    // Activar el modo de reporte de excepciones
 
-// muestra el icono del menu
-function icono(string $nombre): string {
-    return '<img src="img/' . h($nombre) . '.png" alt="" class="icono">';
-}
+    mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
-// variables de la pagina
-$mensaje = "";
-$tipoMensaje = "";
-$proveedorEditar = null;
-$busqueda = trim($_GET["buscar"] ?? "");
+    // 1. Accion eliminar proveedor
 
-// si no es admin lo devuelve a la pagina
-if (!$esAdministrador && (
-    $_SERVER["REQUEST_METHOD"] === "POST" ||
-    isset($_GET["accion"]) ||
-    isset($_GET["buscar"])
-)) {
-    header("Location: proveedor.php?" . $parametros);
-    exit();
-}
+    if (isset($_GET['accion']) && $_GET['accion'] === 'eliminar' && isset($_GET['cod_proveedor'])) {
 
-// eliminar proveedor
-if ($esAdministrador && $_SERVER["REQUEST_METHOD"] === "POST" && ($_POST["accion_formulario"] ?? "") === "eliminar") {
-    $codigo = filter_var($_POST["cod_proveedor"] ?? "", FILTER_VALIDATE_INT);
+        $cod_eliminar = $_GET['cod_proveedor'];
 
-    if ($codigo) {
         try {
-            $stmt = $conn->prepare("DELETE FROM proveedor WHERE cod_proveedor = ?");
-            $stmt->bind_param("i", $codigo);
-            $stmt->execute();
 
-            if ($stmt->affected_rows > 0) {
-                $mensaje = "Proveedor eliminado correctamente.";
-                $tipoMensaje = "error"; // rojo al eliminar
-            } else {
-                $mensaje = "No se encontró el proveedor seleccionado.";
-                $tipoMensaje = "error";
-            }
+            $sql_del = "DELETE FROM proveedor WHERE cod_proveedor = ?";
+            $stmt_del = $conn->prepare($sql_del);
+            $stmt_del->bind_param("i", $cod_eliminar);
+            $stmt_del->execute();
 
-            $stmt->close();
+            $mensaje = "<p style='color:green; font-weight:bold;'>Proveedor con codigo "
+            . htmlspecialchars($cod_eliminar) . " eliminado correctamente.</p>";
+
+            $stmt_del->close();
+
         } catch (mysqli_sql_exception $e) {
-            // 1451 = el proveedor tiene registros relacionados
-            if ((int)$e->getCode() === 1451) {
-                $mensaje = "No se puede eliminar este proveedor porque tiene registros relacionados.";
+
+            // Codigo 1451: restriccion de llave foranea
+
+            if ($e->getCode() == 1451) {
+
+                $mensaje = "<p style='color:red; font-weight:bold;'>No se puede eliminar el proveedor porque tiene productos registrados.</p>";
+
             } else {
-                $mensaje = "Ocurrió un error al eliminar el proveedor.";
+
+                $mensaje = "<p style='color:red; font-weight:bold;'>Error al eliminar: "
+                . htmlspecialchars($e->getMessage()) . "</p>";
+
             }
-            $tipoMensaje = "error";
         }
     }
-}
 
-// buscar el proveedor que se va a editar
-if ($esAdministrador && ($_GET["accion"] ?? "") === "editar" && isset($_GET["cod_proveedor"])) {
-    $codigo = filter_var($_GET["cod_proveedor"], FILTER_VALIDATE_INT);
+    // 2. Accion editar proveedor
 
-    if ($codigo) {
-        $stmt = $conn->prepare("SELECT cod_proveedor, nombre, telefono, direccion, email FROM proveedor WHERE cod_proveedor = ?");
-        $stmt->bind_param("i", $codigo);
-        $stmt->execute();
-        $proveedorEditar = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
+    if (isset($_GET['accion']) && $_GET['accion'] === 'editar' && isset($_GET['cod_proveedor'])) {
 
-        if (!$proveedorEditar) {
-            $mensaje = "No se encontró el proveedor que deseas editar.";
-            $tipoMensaje = "error";
-        }
-    }
-}
+        $cod_buscar = $_GET['cod_proveedor'];
 
-// registrar o actualizar proveedor
-if ($esAdministrador && $_SERVER["REQUEST_METHOD"] === "POST" && ($_POST["accion_formulario"] ?? "") !== "eliminar") {
-    $accionFormulario = $_POST["accion_formulario"] ?? "guardar";
-    $codigo = filter_var($_POST["cod_proveedor"] ?? "", FILTER_VALIDATE_INT);
-    $nombre = trim($_POST["nombre"] ?? "");
-    $telefono = trim($_POST["telefono"] ?? "");
-    $direccion = trim($_POST["direccion"] ?? "");
-    $email = trim($_POST["email"] ?? "");
-
-    if (!$codigo || $nombre === "" || $telefono === "" || $direccion === "" || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $mensaje = "Completa todos los campos y verifica que el correo electrónico sea válido.";
-        $tipoMensaje = "error";
-
-        $proveedorEditar = [
-            "cod_proveedor" => $_POST["cod_proveedor"] ?? "",
-            "nombre" => $nombre,
-            "telefono" => $telefono,
-            "direccion" => $direccion,
-            "email" => $email
-        ];
-    } else {
         try {
-            // si es actualizar hace update, si no hace insert
-            if ($accionFormulario === "actualizar") {
-                $stmt = $conn->prepare("UPDATE proveedor SET nombre = ?, telefono = ?, direccion = ?, email = ? WHERE cod_proveedor = ?");
-                $stmt->bind_param("ssssi", $nombre, $telefono, $direccion, $email, $codigo);
+
+            $sql_buscar = "SELECT * FROM proveedor WHERE cod_proveedor = ?";
+            $stmt_buscar = $conn->prepare($sql_buscar);
+            $stmt_buscar->bind_param("i", $cod_buscar);
+            $stmt_buscar->execute();
+
+            $res = $stmt_buscar->get_result();
+            $proveedor_editar = $res->fetch_assoc();
+
+            $stmt_buscar->close();
+
+        } catch (mysqli_sql_exception $e) {
+
+            $mensaje = "<p style='color:red; font-weight:bold;'>Error al cargar datos: "
+            . htmlspecialchars($e->getMessage()) . "</p>";
+
+        }
+    }
+
+    // 3. Formulario guardar y modificar POST
+
+    if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+        // Registrar nuevo proveedor
+
+        if (isset($_POST["guardar"])) {
+
+            $cod_proveedor = $_POST["cod_proveedor"];
+            $nombre = $_POST["nombre"];
+            $telefono = $_POST["telefono"];
+            $direccion = $_POST["direccion"];
+            $email = $_POST["email"];
+
+            try {
+
+                $sql = "INSERT INTO proveedor
+                (cod_proveedor, nombre, telefono, direccion, email)
+                VALUES (?, ?, ?, ?, ?)";
+
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param("issss", $cod_proveedor, $nombre, $telefono, $direccion, $email);
                 $stmt->execute();
+
+                $mensaje = "<p style='color:green; font-weight:bold;'>Proveedor registrado correctamente.</p>";
+
                 $stmt->close();
 
-                header("Location: proveedor.php?" . $parametros . "&estado=actualizado");
-                exit();
-            } else {
-                $stmt = $conn->prepare("INSERT INTO proveedor (cod_proveedor, nombre, telefono, direccion, email) VALUES (?, ?, ?, ?, ?)");
-                $stmt->bind_param("issss", $codigo, $nombre, $telefono, $direccion, $email);
-                $stmt->execute();
-                $stmt->close();
+            } catch (mysqli_sql_exception $e) {
 
-                header("Location: proveedor.php?" . $parametros . "&estado=registrado");
-                exit();
+                // Codigo 1062: clave primaria duplicada
+
+                if ($e->getCode() == 1062) {
+
+                    $mensaje = "<p style='color:red; font-weight:bold;'>Error: El codigo "
+                    . htmlspecialchars($cod_proveedor) . " ya esta registrado.</p>";
+
+                } else {
+
+                    $mensaje = "<p style='color:red; font-weight:bold;'>Error al registrar: "
+                    . htmlspecialchars($e->getMessage()) . "</p>";
+
+                }
             }
-        } catch (mysqli_sql_exception $e) {
-            // 1062 = codigo repetido
-            if ((int)$e->getCode() === 1062) {
-                $mensaje = "El código de proveedor ya existe. Ingresa un código diferente.";
-            } else {
-                $mensaje = "No fue posible guardar los datos. Verifica la información e inténtalo nuevamente.";
+        }
+
+        // Actualizar proveedor
+
+        if (isset($_POST["actualizar"])) {
+
+            $cod_proveedor = $_POST["cod_proveedor"];
+            $nombre = $_POST["nombre"];
+            $telefono = $_POST["telefono"];
+            $direccion = $_POST["direccion"];
+            $email = $_POST["email"];
+
+            try {
+
+                $sql_up = "UPDATE proveedor
+                           SET nombre = ?, telefono = ?, direccion = ?, email = ?
+                           WHERE cod_proveedor = ?";
+
+                $stmt_up = $conn->prepare($sql_up);
+                $stmt_up->bind_param("ssssi", $nombre, $telefono, $direccion, $email, $cod_proveedor);
+                $stmt_up->execute();
+
+                $mensaje = "<p style='color:green; font-weight:bold;'>Proveedor actualizado correctamente.</p>";
+
+                $stmt_up->close();
+
+            } catch (mysqli_sql_exception $e) {
+
+                $mensaje = "<p style='color:red; font-weight:bold;'>Error al actualizar: "
+                . htmlspecialchars($e->getMessage()) . "</p>";
+
             }
-
-            $tipoMensaje = "error";
-
-            $proveedorEditar = [
-                "cod_proveedor" => $codigo,
-                "nombre" => $nombre,
-                "telefono" => $telefono,
-                "direccion" => $direccion,
-                "email" => $email
-            ];
         }
     }
-}
 
-// mensajes despues de registrar o actualizar
-if (isset($_GET["estado"])) {
-    if ($_GET["estado"] === "registrado") {
-        $mensaje = "Proveedor registrado correctamente.";
-        $tipoMensaje = "ok";
-    } elseif ($_GET["estado"] === "actualizado") {
-        $mensaje = "Proveedor actualizado correctamente.";
-        $tipoMensaje = "ok";
-    }
-}
+    // 4. Buscar y listar proveedores
 
-// consultar y buscar proveedores para la tabla
-$proveedores = null;
-$totalProveedores = 0;
+    if (isset($_GET['buscar']) && !empty(trim($_GET['buscar']))) {
 
-if ($esAdministrador) {
-    if ($busqueda !== "") {
-        $termino = "%" . $busqueda . "%";
+        $busqueda = trim($_GET['buscar']);
+        $param_busqueda = "%" . $busqueda . "%";
 
-        $sql = "SELECT cod_proveedor, nombre, telefono, direccion, email
-                FROM proveedor
-                WHERE CAST(cod_proveedor AS CHAR) LIKE ?
-                   OR nombre LIKE ?
-                   OR telefono LIKE ?
-                   OR direccion LIKE ?
-                   OR email LIKE ?
-                ORDER BY cod_proveedor ASC";
+        $sql_listar = "SELECT cod_proveedor, nombre, telefono, direccion, email
+                       FROM proveedor
+                       WHERE cod_proveedor LIKE ?
+                       OR nombre LIKE ?
+                       OR telefono LIKE ?
+                       OR direccion LIKE ?
+                       OR email LIKE ?";
 
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param("sssss", $termino, $termino, $termino, $termino, $termino);
-        $stmt->execute();
-        $proveedores = $stmt->get_result();
-        $stmt->close();
+        $stmt_list = $conn->prepare($sql_listar);
+        $stmt_list->bind_param(
+            "sssss",
+            $param_busqueda,
+            $param_busqueda,
+            $param_busqueda,
+            $param_busqueda,
+            $param_busqueda
+        );
+        $stmt_list->execute();
+
+        $proveedores = $stmt_list->get_result();
+
     } else {
-        $proveedores = $conn->query("SELECT cod_proveedor, nombre, telefono, direccion, email FROM proveedor ORDER BY cod_proveedor ASC");
+
+        $sql_listar = "SELECT cod_proveedor, nombre, telefono, direccion, email
+                       FROM proveedor
+                       ORDER BY cod_proveedor ASC";
+
+        $proveedores = $conn->query($sql_listar);
     }
-
-    $totalProveedores = $proveedores ? $proveedores->num_rows : 0;
-}
-
-$inicial = function_exists("mb_substr")
-    ? mb_strtoupper(mb_substr(trim($usuario), 0, 1, "UTF-8"), "UTF-8")
-    : strtoupper(substr(trim($usuario), 0, 1));
 ?>
-<!-- pagina html -->
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Proveedores | Supermercado La Granja</title>
-    <link rel="stylesheet" href="css/proveedor.css">
+    <title>Bodega - Proveedores</title>
 </head>
-<body class="pagina-proveedor">
+<body>
 
-<!-- encabezado -->
-<header class="encabezado">
-    <button type="button" class="boton-menu" id="abrirMenu"
-        aria-label="Abrir menú lateral" aria-controls="menuLateral" aria-expanded="false">
-        <?= icono("menu") ?>
-    </button>
+    <?php echo $mensaje; ?>
 
-    <div class="encabezado-logo">
-        <img src="img/logo.png" alt="Logo de La Granja">
-    </div>
+    <!-- Formulario para editar proveedor -->
 
-    <div class="encabezado-texto">
-        <h1>Supermercado La Granja</h1>
-        <p>Sistema de gestión de inventario</p>
-    </div>
+    <?php if ($proveedor_editar) : ?>
 
-    <div class="encabezado-usuario">
-        <span class="usuario-inicial"><?= h($inicial) ?></span>
-        <div>
-            <strong><?= h($usuario) ?></strong>
-            <p><?= $esAdministrador ? "Administrador" : "Empleado" ?></p>
-        </div>
-    </div>
-</header>
+        <h2>Editar Proveedor</h2>
 
-<div class="fondo-menu" id="fondoMenu"></div>
+        <form action="" method="POST">
 
-<!-- menu lateral -->
-<aside class="menu-lateral" id="menuLateral" aria-label="Menú principal">
-    <div class="menu-lateral-encabezado">
-        <div class="menu-lateral-marca">
-            <img src="img/logo.png" alt="Logo de Supermercado La Granja">
-            <div>
-                <h2>Supermercado</h2>
-                <p>La Granja</p>
-            </div>
-        </div>
-        <button type="button" class="boton-cerrar" id="cerrarMenu" aria-label="Cerrar menú lateral">
-            <?= icono("cerrar") ?>
-        </button>
-    </div>
+            <input type="hidden" name="cod_proveedor"
+            value="<?php echo htmlspecialchars($proveedor_editar['cod_proveedor']); ?>">
 
-    <div class="menu-lateral-usuario">
-        <div class="usuario-inicial usuario-grande"><?= h($inicial) ?></div>
-        <div>
-            <strong><?= h($usuario) ?></strong>
-            <p><?= $esAdministrador ? "Administrador" : "Empleado" ?></p>
-        </div>
-    </div>
+            <label>Codigo Proveedor:</label><br>
+            <input type="number"
+            value="<?php echo htmlspecialchars($proveedor_editar['cod_proveedor']); ?>"
+            disabled><br><br>
 
-    <nav class="navegacion">
-        <p class="titulo-navegacion">MENÚ PRINCIPAL</p>
-        <div class="lista-navegacion">
-            <a href="menu.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                <span class="caja-icono"><?= icono("inicio") ?></span>
-                <span>Inicio</span>
-            </a>
-            <a href="cliente.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                <span class="caja-icono"><?= icono("cliente") ?></span>
-                <span>Clientes</span>
-            </a>
-            <a href="mov_salida.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                <span class="caja-icono"><?= icono("salida") ?></span>
-                <span>Movimiento de salida</span>
-            </a>
+            <label>Nombre:</label><br>
+            <input type="text" name="nombre"
+            value="<?php echo htmlspecialchars($proveedor_editar['nombre']); ?>"
+            required><br><br>
 
-            <?php if ($esAdministrador): ?>
-                <a href="producto.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                    <span class="caja-icono"><?= icono("producto") ?></span>
-                    <span>Productos</span>
-                </a>
-                <a href="mov_entrada.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                    <span class="caja-icono"><?= icono("entrada") ?></span>
-                    <span>Movimiento de entrada</span>
-                </a>
-                <a href="proveedor.php?<?= $parametrosHtml ?>" class="enlace-menu activo" aria-current="page">
-                    <span class="caja-icono"><?= icono("proveedor") ?></span>
-                    <span>Proveedores</span>
-                </a>
-                <a href="inventario.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                    <span class="caja-icono"><?= icono("inventario") ?></span>
-                    <span>Inventario</span>
-                </a>
-                <a href="reportes.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                    <span class="caja-icono"><?= icono("reportes") ?></span>
-                    <span>Reportes</span>
-                </a>
-                <a href="edita_usuario.php?<?= $parametrosHtml ?>" class="enlace-menu">
-                    <span class="caja-icono"><?= icono("usuario") ?></span>
-                    <span>Modificar usuario</span>
-                </a>
-            <?php endif; ?>
-        </div>
-    </nav>
+            <label>Telefono:</label><br>
+            <input type="text" name="telefono"
+            value="<?php echo htmlspecialchars($proveedor_editar['telefono']); ?>"
+            required><br><br>
 
-    <form action="menu.php?<?= $parametrosHtml ?>" method="POST" class="form-salir">
-        <button type="submit" name="salir" value="1" class="boton-salir">
-            <span class="caja-icono caja-icono-roja"><?= icono("salir") ?></span>
-            <span>Cerrar sesión</span>
-        </button>
-    </form>
-</aside>
+            <label>Direccion:</label><br>
+            <input type="text" name="direccion"
+            value="<?php echo htmlspecialchars($proveedor_editar['direccion']); ?>"
+            required><br><br>
 
-<!-- contenido principal -->
-<main class="contenido">
-    <section class="titulo-pagina">
-        <span class="titulo-icono"><?= icono("proveedor") ?></span>
-        <div>
-            <h2>Proveedores</h2>
-            <p>Registra, busca, edita y administra la información de los proveedores.</p>
-        </div>
-    </section>
+            <label>Email:</label><br>
+            <input type="email" name="email"
+            value="<?php echo htmlspecialchars($proveedor_editar['email']); ?>"
+            required><br><br>
 
-    <!-- mensaje de aviso -->
-    <?php if ($mensaje !== ""): ?>
-        <div class="mensaje mensaje-<?= h($tipoMensaje) ?>" role="status">
-            <?= h($mensaje) ?>
-        </div>
-    <?php endif; ?>
+            <button type="submit" name="actualizar">Actualizar Proveedor</button>
 
-    <!-- el empleado no tiene acceso -->
-    <?php if (!$esAdministrador): ?>
-        <section class="panel">
-            <h3 class="panel-titulo">Acceso de empleado</h3>
-            <p>Tu cargo no tiene permiso para registrar, editar, eliminar ni consultar la tabla de proveedores.</p>
-            <div class="botones" style="margin-top: 18px;">
-                <a class="boton boton-principal" href="menu.php?<?= $parametrosHtml ?>">Volver al menú principal</a>
-            </div>
-        </section>
+            <a href="?">Cancelar</a>
+
+        </form>
+
     <?php else: ?>
-        <!-- formulario de proveedor -->
-        <section class="panel">
-            <h3 class="panel-titulo"><?= $proveedorEditar ? "Editar proveedor" : "Ingresar proveedor" ?></h3>
 
-            <form action="proveedor.php?<?= $parametrosHtml ?>" method="POST" id="formularioProveedor" class="formulario">
-                <input type="hidden" name="accion_formulario" value="<?= $proveedorEditar ? "actualizar" : "guardar" ?>">
+        <!-- Formulario para registrar proveedor -->
 
-                <div class="campo">
-                    <label for="cod_proveedor">Código del proveedor</label>
-                    <input type="number" id="cod_proveedor" name="cod_proveedor" min="1" required
-                        placeholder="Ingrese código"
-                        value="<?= h($proveedorEditar["cod_proveedor"] ?? "") ?>"
-                        <?= $proveedorEditar ? "readonly" : "" ?>>
-                </div>
+        <h2>Ingresar Proveedor</h2>
 
-                <div class="campo">
-                    <label for="nombre">Nombre del proveedor</label>
-                    <input type="text" id="nombre" name="nombre" maxlength="100" required
-                        placeholder="Ingrese nombre"
-                        value="<?= h($proveedorEditar["nombre"] ?? "") ?>">
-                </div>
+        <form action="" method="POST">
 
-                <div class="campo">
-                    <label for="telefono">Teléfono</label>
-                    <input type="text" id="telefono" name="telefono" maxlength="25" required
-                        placeholder="Ingrese teléfono"
-                        value="<?= h($proveedorEditar["telefono"] ?? "") ?>">
-                </div>
+            <label>Codigo Proveedor:</label><br>
+            <input type="number" name="cod_proveedor"
+            required placeholder="Ingrese codigo"><br><br>
 
-                <div class="campo">
-                    <label for="email">Correo electrónico</label>
-                    <input type="email" id="email" name="email" maxlength="120" required
-                        placeholder="Ingrese correo electrónico"
-                        value="<?= h($proveedorEditar["email"] ?? "") ?>">
-                </div>
+            <label>Nombre:</label><br>
+            <input type="text" name="nombre"
+            required placeholder="Ingrese nombre"><br><br>
 
-                <div class="campo campo-ancho">
-                    <label for="direccion">Dirección</label>
-                    <input type="text" id="direccion" name="direccion" maxlength="180" required
-                        placeholder="Ingrese dirección"
-                        value="<?= h($proveedorEditar["direccion"] ?? "") ?>">
-                </div>
+            <label>Telefono:</label><br>
+            <input type="text" name="telefono"
+            required placeholder="Ingrese telefono"><br><br>
 
-                <div class="botones campo-ancho">
-                    <?php if ($proveedorEditar): ?>
-                        <button type="submit" class="boton boton-principal boton-registrar">
-                            Actualizar proveedor
-                        </button>
-                        <a href="proveedor.php?<?= $parametrosHtml ?>" class="boton boton-secundario">Cancelar</a>
-                    <?php else: ?>
-                        <button type="submit" class="boton boton-principal boton-registrar">
-                            Registrar proveedor
-                        </button>
-                    <?php endif; ?>
-                </div>
-            </form>
-        </section>
+            <label>Direccion:</label><br>
+            <input type="text" name="direccion"
+            required placeholder="Ingrese direccion"><br><br>
 
-        <!-- buscador -->
-        <section class="panel">
-            <h3 class="panel-titulo">Buscar proveedor</h3>
-            <form action="proveedor.php" method="GET" class="buscador">
-                <input type="hidden" name="usuario" value="<?= htmlspecialchars($usuario, ENT_QUOTES, "UTF-8") ?>">
-                <input type="hidden" name="rol" value="<?= htmlspecialchars($cargo, ENT_QUOTES, "UTF-8") ?>">
-                <input type="search" name="buscar" aria-label="Buscar proveedores"
-                    placeholder="Código, nombre, teléfono, dirección o correo electrónico..."
-                    value="<?= h($busqueda) ?>">
-                <button type="submit" class="boton boton-principal">Buscar</button>
-                <?php if ($busqueda !== ""): ?>
-                    <a href="proveedor.php?<?= $parametrosHtml ?>" class="boton boton-secundario">Mostrar todos</a>
-                <?php endif; ?>
-            </form>
-        </section>
+            <label>Email:</label><br>
+            <input type="email" name="email"
+            required placeholder="Ingrese email"><br><br>
 
-        <!-- tabla de proveedores -->
-        <section class="panel">
-            <h3 class="panel-titulo">Listado de proveedores</h3>
-            <div class="tabla-contenedor">
-                <table class="tabla">
-                    <thead>
-                        <tr>
-                            <th>Código</th>
-                            <th>Nombre</th>
-                            <th>Teléfono</th>
-                            <th>Dirección</th>
-                            <th>Correo electrónico</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if ($proveedores && $proveedores->num_rows > 0): ?>
-                            <?php while ($fila = $proveedores->fetch_assoc()): ?>
-                                <tr>
-                                    <td><?= h($fila["cod_proveedor"]) ?></td>
-                                    <td><?= h($fila["nombre"]) ?></td>
-                                    <td><?= h($fila["telefono"]) ?></td>
-                                    <td><?= h($fila["direccion"]) ?></td>
-                                    <td><?= h($fila["email"]) ?></td>
-                                    <td class="tabla-acciones">
-                                        <a class="boton boton-chico boton-editar"
-                                            href="proveedor.php?<?= $parametrosHtml ?>&amp;accion=editar&amp;cod_proveedor=<?= urlencode((string)$fila["cod_proveedor"]) ?>">
-                                            Editar
-                                        </a>
-                                        <form action="proveedor.php?<?= $parametrosHtml ?>" method="POST" class="form-eliminar"
-                                            onsubmit="return confirm('¿Seguro que deseas eliminar este proveedor?');">
-                                            <input type="hidden" name="accion_formulario" value="eliminar">
-                                            <input type="hidden" name="cod_proveedor" value="<?= h($fila["cod_proveedor"]) ?>">
-                                            <button type="submit" class="boton boton-chico boton-eliminar">Eliminar</button>
-                                        </form>
-                                    </td>
-                                </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr>
-                                <td colspan="6" class="tabla-vacia">No se encontraron proveedores registrados.</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-            <p class="total-registros">Total de registros: <?= (int)$totalProveedores ?></p>
-        </section>
+            <button type="submit" name="guardar">Registrar</button>
+
+        </form>
+
     <?php endif; ?>
-</main>
 
-<!-- pie de pagina -->
-<footer class="pie-pagina">
-    <div class="footer-contenido">
-        <section class="footer-ayuda">
-            <h4>AYUDA Y SOPORTE</h4>
-            <p class="footer-descripcion">
-                Encuentra orientación para utilizar correctamente el sistema de gestión de inventario.
-            </p>
-            <a href="ayuda.php?<?= $parametrosHtml ?>" class="footer-enlace"><span class="footer-icono">ⓘ</span>Centro de ayuda</a>
-            <a href="ayuda.php?<?= $parametrosHtml ?>#privacidad" class="footer-enlace"><span class="footer-icono">♧</span>Privacidad y seguridad</a>
-            <a href="ayuda.php?<?= $parametrosHtml ?>#uso" class="footer-enlace"><span class="footer-icono">▤</span>Manual de uso del sistema</a>
-            <a href="ayuda.php?<?= $parametrosHtml ?>#soporte" class="footer-enlace"><span class="footer-icono">?</span>Asistencia técnica</a>
-            <a href="ayuda.php?<?= $parametrosHtml ?>#inventario" class="footer-enlace"><span class="footer-icono">▣</span>Gestión y control de inventario</a>
-            <a href="ayuda.php?<?= $parametrosHtml ?>#movimientos" class="footer-enlace"><span class="footer-icono">↔</span>Movimientos de entrada y salida</a>
-        </section>
+    <br>
 
-        <section class="footer-informacion">
-            <h4>INFORMACIÓN DEL SISTEMA</h4>
-            <p><strong>Plataforma administrativa</strong><br>
-                Herramienta para organizar y controlar los productos del supermercado.</p>
-            <p><strong>Gestión de productos</strong><br>
-                Registro, consulta y actualización de información de los productos.</p>
-            <p><strong>Control de movimientos</strong><br>
-                Seguimiento de las entradas y salidas de mercancía.</p>
-            <div class="footer-nota">
-                <strong>Uso del sistema</strong>
-                <p>Acceso destinado a empleados y administradores autorizados.</p>
-            </div>
-        </section>
-    </div>
+    <form action="menu.php" method="POST" style="display:inline;">
+        <button type="submit">Menu Principal</button>
+    </form>
 
-    <div class="footer-inferior">
-        <p>&copy; <?= date("Y") ?> Supermercado La Granja. Todos los derechos reservados.</p>
-        <p>Sistema de gestión de inventario</p>
-    </div>
-</footer>
+    <hr>
+    <hr>
 
-<!-- abrir y cerrar el menu lateral -->
-<script>
-const abrirMenu = document.getElementById("abrirMenu");
-const cerrarMenu = document.getElementById("cerrarMenu");
-const fondoMenu = document.getElementById("fondoMenu");
+    <!-- Caja de texto para buscar proveedor -->
 
-function mostrarMenu() {
-    document.body.classList.add("menu-abierto");
-    abrirMenu.setAttribute("aria-expanded", "true");
-}
+    <h3>Buscar Proveedor</h3>
 
-function ocultarMenu() {
-    document.body.classList.remove("menu-abierto");
-    abrirMenu.setAttribute("aria-expanded", "false");
-}
+    <form action="" method="GET">
 
-abrirMenu.addEventListener("click", mostrarMenu);
-cerrarMenu.addEventListener("click", ocultarMenu);
-fondoMenu.addEventListener("click", ocultarMenu);
+        <input type="text" name="buscar"
+        placeholder="Ingrese codigo, nombre, telefono o email..."
+        value="<?php echo htmlspecialchars($busqueda); ?>">
 
-document.addEventListener("keydown", function(evento) {
-    if (evento.key === "Escape") ocultarMenu();
-});
-</script>
+        <button type="submit">Buscar</button>
+
+        <?php if (!empty($busqueda)): ?>
+            <a href="?">Mostrar todos</a>
+        <?php endif; ?>
+
+    </form>
+
+    <br>
+
+    <!-- Tabla de resultados de proveedores -->
+
+    <h3>Listado de Proveedores</h3>
+
+    <table border="1" cellpadding="5" cellspacing="0">
+
+        <thead>
+
+            <tr>
+                <th>Codigo</th>
+                <th>Nombre</th>
+                <th>Telefono</th>
+                <th>Direccion</th>
+                <th>Email</th>
+                <th>Acciones</th>
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+            <?php if ($proveedores && $proveedores->num_rows > 0) : ?>
+
+                <?php while ($fila = $proveedores->fetch_assoc()) : ?>
+
+                    <tr>
+
+                        <td><?php echo htmlspecialchars($fila['cod_proveedor']); ?></td>
+                        <td><?php echo htmlspecialchars($fila['nombre']); ?></td>
+                        <td><?php echo htmlspecialchars($fila['telefono']); ?></td>
+                        <td><?php echo htmlspecialchars($fila['direccion']); ?></td>
+                        <td><?php echo htmlspecialchars($fila['email']); ?></td>
+
+                        <td>
+
+                            <a href="?accion=editar&cod_proveedor=<?php echo urlencode($fila['cod_proveedor']); ?>">Editar</a> |
+
+                            <a href="?accion=eliminar&cod_proveedor=<?php echo urlencode($fila['cod_proveedor']); ?>"
+                            onclick="return confirm('¿Seguro que deseas eliminar este proveedor?');">Eliminar</a>
+
+                        </td>
+
+                    </tr>
+
+                <?php endwhile; ?>
+
+            <?php else: ?>
+
+                <tr>
+                    <td colspan="6">No se encontraron proveedores.</td>
+                </tr>
+
+            <?php endif; ?>
+
+        </tbody>
+
+    </table>
 
 </body>
 </html>
+
+<?php
+$conn->close();
+?>

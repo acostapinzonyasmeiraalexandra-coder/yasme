@@ -4,59 +4,46 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Supermercado La Granja</title>
-    <link rel="stylesheet" href="css/index.css">
 </head>
-<body class="pagina">
+<body>
 
-    <!-- ========== ENCABEZADO ========== -->
-    <header class="encabezado">
-        <h2 class="encabezado__titulo">Supermercado La Granja</h2>
-    </header>
+        <h2>Supermercado La Granja</h2>
 
-    <!-- ========== CONTENIDO PRINCIPAL ========== -->
-    <main class="contenedor">
+       <form action="usuario.php" method="POST">
 
-        <!-- Tarjeta del login -->
-        <section class="tarjeta">
+            <label>Cargo:</label><br>
+            <select name="cargo" required>
 
-            <!-- Formulario de ingreso -->
-            <form class="formulario" action="usuario.php" method="POST">
+                <option value="">seleccione</option>
+                <option  value ="1">Administrador</option>
+                <option value ="2">Empleado</option>
+    
 
-                <!-- Cargo -->
-                <div class="campo">
-                    <label class="campo__etiqueta" for="cargo">Cargo:</label>
-                    <select class="campo__select" id="cargo" name="cargo" required>
-                        <option value="">seleccione</option>
-                        <option value="1">Administrador</option>
-                        <option value="2">Empleado</option>
-                    </select>
-                </div>
+            </select><br><br>
 
-                <!-- Usuario -->
-                <div class="campo">
-                    <label class="campo__etiqueta" for="usuario">Usuario:</label>
-                    <input class="campo__input" type="text" id="usuario" name="usuario" required>
-                </div>
+            <label>Usuario:</label>
+            <input type="text" name="usuario" required>
 
-                <!-- Contraseña -->
-                <div class="campo">
-                    <label class="campo__etiqueta" for="contra">Contraseña:</label>
-                    <input class="campo__input" type="password" id="contra" name="contra" required>
-                </div>
+            <br><br>
 
-                <!-- Botón ingresar -->
-                <button class="boton boton--principal" type="submit" name="ingresar">Ingresar</button>
+            <label>Contraseña:</label>
+            <input type="password" name="contra" required>
 
-            </form>
+             <br><br>
 
-            <!-- Formulario de registro -->
-            <form class="formulario formulario--registro" action="registro.php">
-                <button class="boton boton--secundario">Registrarse</button>
-            </form>
+             <button type="submit" name="ingresar">Ingresar</button>
+             
+        
+             
+         
 
-        </section>
+      </form><br><br>
+      <form action="registro.php">
+   
+                <button>Registrarse</button>
 
-    </main>
-
+        </form>
+      
+    
 </body>
 </html>

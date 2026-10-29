@@ -1,67 +1,51 @@
 <?php
-
-mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+session_start();
 
 include("conexion.php");
 
-// Obtener los datos del formulario.
-$usuario = $_POST["usuario"] ?? "";
-$password = $_POST["contra"] ?? "";
-$cargo = $_POST["cargo"] ?? "";
+// Si entran a esta página sin llenar el formulario, regresar al inicio
+if (!isset($_POST["usuario"]) || !isset($_POST["contra"]) || !isset($_POST["cargo"])) {
+    header("Location: index.html");
+    exit();
+}
 
-// Buscar el usuario en la base de datos.
-$stmt = $conn->prepare(
-    "SELECT usuario, id_tipo_usuario
-     FROM usuario
-     WHERE usuario = ? AND contra = ? AND id_tipo_usuario = ?"
-);
+$usuario  = $_POST["usuario"];
+$password = $_POST["contra"];
+$cargo    = intval($_POST["cargo"]);
 
-// Vincular los datos.
+// 1. Buscar en la tabla usuario
+$stmt = $conn->prepare("SELECT * FROM usuario WHERE usuario = ? AND contra = ? AND id_tipo_usuario = ?");
+
+// 2. "ssi" = string, string, integer
 $stmt->bind_param("ssi", $usuario, $password, $cargo);
 
-// Ejecutar la consulta.
+// 3. Ejecutar
 $stmt->execute();
 
-// Obtener el resultado.
+// 4. Obtener el resultado
 $resultado = $stmt->get_result();
 
-// Verificar los datos del usuario.
+// 5. Validar si encontró coincidencia
 if ($resultado->num_rows > 0) {
 
-    $fila = $resultado->fetch_assoc();
+    // Guardar los datos en la sesión (menu.php los necesita)
+    session_regenerate_id(true);
+    $_SESSION["usuario"] = $usuario;
+    $_SESSION["cargo"] = (string)$cargo;
 
-    // Obtener el nombre y el cargo del usuario.
-    $nombreUsuario = $fila["usuario"];
-    $rol = (string) $fila["id_tipo_usuario"];
-
-    // Cerrar la consulta y la conexión.
-    $stmt->close();
-    $conn->close();
-
-    // Abrir el menú con el nombre y el rol.
-    if ($rol === "1" || $rol === "2") {
-        header(
-            "Location: menu.php?usuario=" . urlencode($nombreUsuario) .
-            "&rol=" . urlencode($rol)
-        );
-        exit();
-    }
-
-    header("Location: index.html");
+    header("Location: menu.php");
     exit();
 
 } else {
 
-    // Cerrar la consulta y la conexión.
-    $stmt->close();
-    $conn->close();
-
-    // Mostrar un mensaje si los datos son incorrectos.
     echo "<script>
-        alert('Usuario o contraseña incorrectos');
-        window.location.href = 'index.html';
-    </script>";
-    exit();
+            alert('Usuario o Contraseña incorrectos');
+            window.location.href = 'index.html';
+          </script>";
 }
+
+// 6. Cerrar conexiones
+$stmt->close();
+$conn->close();
 
 ?>
