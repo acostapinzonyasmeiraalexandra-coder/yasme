@@ -1,71 +1,52 @@
 <?php
-/* =====================================================
-   0. SESION Y PERMISOS
-   ===================================================== */
 
-session_start();
+// usuario y rol llegan por la url
+$usuario = trim((string) ($_GET["usuario"] ?? ""));
+$cargo = (string) ($_GET["rol"] ?? "");
 
-// Si no ha iniciado sesion, vuelve al inicio.
-if (!isset($_SESSION["usuario"]) || !isset($_SESSION["cargo"])) {
+if ($usuario === "" || ($cargo !== "1" && $cargo !== "2")) {
     header("Location: index.html");
     exit();
 }
 
-// Cargo: "1" = administrador, "2" = empleado.
-$cargo = (string)$_SESSION["cargo"];
+// se agregan a los enlaces para no perder la sesion
+$parametros = "usuario=" . urlencode($usuario) . "&rol=" . urlencode($cargo);
+$parametrosHtml = htmlspecialchars($parametros, ENT_QUOTES, "UTF-8");
 
-// Si el cargo no es 1 ni 2, va al menu.
-if ($cargo != "1" && $cargo != "2") {
-    header("Location: menu.php");
-    exit();
+$esAdmin = ($cargo === "1");
+$inicial = strtoupper(substr(trim($usuario), 0, 1));
+$nombreCargo = $esAdmin ? "Administrador" : "Empleado";
+
+// evita que el texto rompa el html
+function escapar($dato): string {
+    return htmlspecialchars((string)$dato, ENT_QUOTES, "UTF-8");
 }
 
-// true si es administrador, false si es empleado.
-$esAdmin = ($cargo == "1");
-
-
-/* =====================================================
-   1. CONEXION A LA BASE DE DATOS
-   ===================================================== */
-
-// Los errores de MySQL se vuelven excepciones (para el try/catch).
-mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
-
-include("conexion.php");
-
-// La conexion puede llamarse $conn o $conexion.
-if (!isset($conn) && isset($conexion)) {
-    $conn = $conexion;
+function icono(string $nombre): string {
+    return '<img src="img/' . escapar($nombre) . '.png" alt="" class="icono">';
 }
 
-if (!isset($conn)) {
-    die("Error: no se pudo conectar con la base de datos.");
-}
-
-// Para que se vean bien las tildes y la ñ.
-$conn->set_charset("utf8mb4");
-
-
-/* =====================================================
-   2. FUNCIONES
-   ===================================================== */
-
-// Limpia un texto antes de mostrarlo en pantalla.
-function e($texto)
-{
-    return htmlspecialchars((string)$texto, ENT_QUOTES, "UTF-8");
-}
-
-// Muestra un numero como dinero. Ejemplo: 1500 -> $1.500,00
-function formatoMoneda($valor)
-{
+// da formato de pesos a un numero
+function formatoMoneda($valor): string {
     return "$" . number_format((float)$valor, 2, ",", ".");
 }
 
-// Muestra la factura de un movimiento, lista para imprimir.
-function mostrarFactura($conn, $codigo)
-{
-    // Buscamos los datos de la factura y del cliente.
+// conexion a la base de datos
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+require_once "conexion.php";
+
+if (!isset($conn) && isset($conexion)) {
+    $conn = $conexion;
+}
+if (!isset($conn) || !($conn instanceof mysqli)) {
+    http_response_code(500);
+    exit("Error: No se encontró una conexión válida a la base de datos.");
+}
+
+$conn->set_charset("utf8mb4");
+
+// arma la factura para imprimir
+function mostrarFactura($conn, $codigo) {
     $stmt = $conn->prepare(
         "SELECT f.cod_movimiento, f.fecha, f.cedula_cliente,
                 c.nombre, c.telefono, c.email, c.direccion
@@ -78,10 +59,10 @@ function mostrarFactura($conn, $codigo)
     $factura = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
+    // productos de la factura y su total
     $detalles = [];
     $total = 0;
 
-    // Si la factura existe, buscamos sus productos y sumamos el total.
     if ($factura) {
         $stmt = $conn->prepare(
             "SELECT cod_producto, nombre_producto, precio, cantidad
@@ -95,9 +76,8 @@ function mostrarFactura($conn, $codigo)
 
         while ($detalle = $resDetalles->fetch_assoc()) {
             $detalles[] = $detalle;
-            $total = $total + ($detalle["precio"] * $detalle["cantidad"]);
+            $total += ($detalle["precio"] * $detalle["cantidad"]);
         }
-
         $stmt->close();
     }
     ?>
@@ -105,133 +85,95 @@ function mostrarFactura($conn, $codigo)
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Factura <?php echo e($codigo); ?></title>
+        <title>Factura <?= escapar($codigo) ?></title>
+        <style>
+            body { font-family: sans-serif; padding: 20px; font-size: 14px; }
+            .centro { text-align: center; }
+            .derecha { text-align: right; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th, td { border: 1px solid #ccc; padding: 8px; }
+            th { background: #f0fdf4; }
+            .total { font-weight: bold; }
+            @media print { .no-imprimir { display: none; } }
+        </style>
     </head>
     <body>
-
         <?php if (!$factura): ?>
-
             <p>La factura no existe.</p>
-
-            <p class="no-imprimir">
-                <button type="button" onclick="window.close()">Cerrar</button>
-            </p>
-
         <?php else: ?>
-
             <div class="centro">
                 <h2>Supermercado La Granja</h2>
-                <h3>FACTURA DE VENTA N° <?php echo e($factura["cod_movimiento"]); ?></h3>
+                <h3>FACTURA DE VENTA N° <?= escapar($factura["cod_movimiento"]) ?></h3>
             </div>
-
             <p>
-                <strong>Fecha:</strong> <?php echo e($factura["fecha"]); ?><br>
-                <strong>Atendió:</strong> <?php echo e($_SESSION["usuario"]); ?>
+                <strong>Fecha:</strong> <?= escapar($factura["fecha"]) ?><br>
+                <strong>Atendió:</strong> <?= escapar($usuario) ?>
             </p>
-
             <p>
-                <strong>Cliente:</strong> <?php echo e($factura["nombre"] ?? "Sin nombre"); ?><br>
-                <strong>Cédula:</strong> <?php echo e($factura["cedula_cliente"]); ?><br>
-                <strong>Teléfono:</strong> <?php echo e($factura["telefono"] ?? ""); ?><br>
-                <strong>Email:</strong> <?php echo e($factura["email"] ?? ""); ?><br>
-                <strong>Dirección:</strong> <?php echo e($factura["direccion"] ?? ""); ?>
+                <strong>Cliente:</strong> <?= escapar($factura["nombre"] ?? "Sin nombre") ?><br>
+                <strong>Cédula:</strong> <?= escapar($factura["cedula_cliente"]) ?><br>
+                <strong>Teléfono:</strong> <?= escapar($factura["telefono"] ?? "") ?><br>
+                <strong>Email:</strong> <?= escapar($factura["email"] ?? "") ?><br>
+                <strong>Dirección:</strong> <?= escapar($factura["direccion"] ?? "") ?>
             </p>
-
             <table>
                 <thead>
                     <tr>
                         <th>Código</th>
                         <th>Producto</th>
-                        <th class="derecha">Precio unitario</th>
-                        <th class="derecha">Cantidad</th>
+                        <th class="derecha">Precio U.</th>
+                        <th class="derecha">Cant.</th>
                         <th class="derecha">Subtotal</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($detalles as $detalle): ?>
                         <tr>
-                            <td><?php echo e($detalle["cod_producto"]); ?></td>
-                            <td><?php echo e($detalle["nombre_producto"]); ?></td>
-                            <td class="derecha"><?php echo formatoMoneda($detalle["precio"]); ?></td>
-                            <td class="derecha"><?php echo e($detalle["cantidad"]); ?></td>
-                            <td class="derecha">
-                                <?php echo formatoMoneda($detalle["precio"] * $detalle["cantidad"]); ?>
-                            </td>
+                            <td><?= escapar($detalle["cod_producto"]) ?></td>
+                            <td><?= escapar($detalle["nombre_producto"]) ?></td>
+                            <td class="derecha"><?= formatoMoneda($detalle["precio"]) ?></td>
+                            <td class="derecha"><?= escapar($detalle["cantidad"]) ?></td>
+                            <td class="derecha"><?= formatoMoneda($detalle["precio"] * $detalle["cantidad"]) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
                 <tfoot>
                     <tr>
                         <td colspan="4" class="derecha total">TOTAL</td>
-                        <td class="derecha total"><?php echo formatoMoneda($total); ?></td>
+                        <td class="derecha total"><?= formatoMoneda($total) ?></td>
                     </tr>
                 </tfoot>
             </table>
-
-            <p class="centro">¡Gracias por su compra!</p>
-
-            <p class="centro no-imprimir">
+            <p class="centro" style="margin-top:20px;">¡Gracias por su compra!</p>
+            <p class="centro no-imprimir" style="margin-top:15px;">
                 <button type="button" onclick="window.print()">Imprimir factura</button>
                 <button type="button" onclick="window.close()">Cerrar</button>
             </p>
-
         <?php endif; ?>
-
         <script>
-            // Si la factura se carga dentro del marco oculto, se imprime sola.
             window.addEventListener("load", function () {
                 if (window.frameElement) {
-                    setTimeout(function () {
-                        window.print();
-                    }, 300);
+                    setTimeout(function () { window.print(); }, 300);
                 }
             });
         </script>
-
     </body>
     </html>
     <?php
 }
 
-
-/* =====================================================
-   3. VARIABLES INICIALES
-   ===================================================== */
-
-$mensaje = "";                    // Texto del aviso.
-$tipoMensaje = "";                // "bien" (verde) o "error" (rojo).
-$factura_editar = null;           // Factura que se esta editando.
-$detalles_editar = [];            // Productos de la factura que se edita.
-$cedulaSeleccionada = "";         // Cedula del cliente elegido.
-$clienteSeleccionadoTexto = "";   // Texto "cedula - nombre".
-
-// Texto del buscador del administrador.
-$busqueda = "";
-if (isset($_GET["buscar"])) {
-    $busqueda = trim($_GET["buscar"]);
+if (isset($_GET["factura"])) {
+    mostrarFactura($conn, (int)$_GET["factura"]);
+    exit();
 }
 
-
-/* =====================================================
-   4. AUTOCOMPLETAR PRODUCTOS
-   El formulario pregunta por un codigo y aqui se responde
-   con el nombre y el precio del producto.
-   ===================================================== */
-
+// busca un producto por su codigo (ajax)
 if (isset($_GET["producto_codigo"])) {
-
     header("Content-Type: application/json; charset=utf-8");
-
     try {
-        $codigoProducto = trim($_GET["producto_codigo"]);
-
-        $stmt = $conn->prepare(
-            "SELECT cod_producto, nombre, precio
-             FROM producto
-             WHERE cod_producto = ?"
-        );
-        $stmt->bind_param("s", $codigoProducto);
+        $codigoProducto = (int) $_GET["producto_codigo"];
+        $stmt = $conn->prepare("SELECT cod_producto, nombre, precio FROM producto WHERE cod_producto = ?");
+        $stmt->bind_param("i", $codigoProducto);
         $stmt->execute();
         $producto = $stmt->get_result()->fetch_assoc();
         $stmt->close();
@@ -246,52 +188,31 @@ if (isset($_GET["producto_codigo"])) {
         } else {
             echo json_encode(["existe" => false]);
         }
-
-    } catch (Exception $ex) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(["existe" => false]);
     }
-
-    exit(); // No hay que dibujar la pagina.
+    exit();
 }
 
-
-/* =====================================================
-   5. BUSCAR CLIENTES POR CEDULA O NOMBRE
-   ===================================================== */
-
+// busca clientes por cedula o nombre (ajax)
 if (isset($_GET["buscar_cliente"])) {
-
     header("Content-Type: application/json; charset=utf-8");
-
     try {
         $textoCliente = trim($_GET["buscar_cliente"]);
-
-        // Si no escribio nada, devolvemos una lista vacia.
-        if ($textoCliente == "") {
+        if ($textoCliente === "") {
             echo json_encode([]);
             exit();
         }
 
-        // Si el texto es "123 - Ana", la cedula es lo de antes del " - ".
         $parteCedula = explode(" - ", $textoCliente)[0];
-
-        // Los % significan "que contenga este texto".
         $filtro = "%" . $textoCliente . "%";
         $filtroCedula = "%" . trim($parteCedula) . "%";
 
         $stmt = $conn->prepare(
-            "SELECT cedula_cliente, nombre
-             FROM cliente
-             WHERE CAST(cedula_cliente AS CHAR) LIKE ?
-                OR nombre LIKE ?
-             ORDER BY
-                CASE
-                    WHEN CAST(cedula_cliente AS CHAR) = ? THEN 0
-                    WHEN nombre = ? THEN 0
-                    ELSE 1
-                END,
-                nombre ASC
+            "SELECT cedula_cliente, nombre FROM cliente
+             WHERE CAST(cedula_cliente AS CHAR) LIKE ? OR nombre LIKE ?
+             ORDER BY CASE WHEN CAST(cedula_cliente AS CHAR) = ? THEN 0 WHEN nombre = ? THEN 0 ELSE 1 END, nombre ASC
              LIMIT 10"
         );
         $stmt->bind_param("ssss", $filtroCedula, $filtro, $parteCedula, $textoCliente);
@@ -299,121 +220,67 @@ if (isset($_GET["buscar_cliente"])) {
         $resClientes = $stmt->get_result();
 
         $lista = [];
-
-        while ($cliente = $resClientes->fetch_assoc()) {
-            $lista[] = [
-                "cedula" => $cliente["cedula_cliente"],
-                "nombre" => $cliente["nombre"]
-            ];
+        while ($c = $resClientes->fetch_assoc()) {
+            $lista[] = ["cedula" => $c["cedula_cliente"], "nombre" => $c["nombre"]];
         }
-
         $stmt->close();
-
         echo json_encode($lista, JSON_UNESCAPED_UNICODE);
-
-    } catch (Exception $ex) {
+    } catch (Exception $e) {
         http_response_code(500);
         echo json_encode([]);
     }
-
     exit();
 }
 
+// variables para guardar, editar y eliminar
+$mensaje = "";
+$tipoMensaje = "";
+$factura_editar = null;
+$detalles_editar = [];
+$cedulaSeleccionada = "";
+$clienteSeleccionadoTexto = "";
+$busqueda = trim((string)($_GET["buscar"] ?? ""));
 
-/* =====================================================
-   5B. GENERAR LA FACTURA
-   Se activa cuando la URL trae ?factura=NUMERO
-   ===================================================== */
-
-if (isset($_GET["factura"])) {
-
-    try {
-        mostrarFactura($conn, intval($_GET["factura"]));
-
-    } catch (Exception $ex) {
-        echo "No se pudo generar la factura: " . e($ex->getMessage());
-    }
-
-    exit(); // No hay que dibujar el resto de la pagina.
-}
-
-
-/* =====================================================
-   6. ELIMINAR UN MOVIMIENTO (SOLO ADMINISTRADOR)
-   Se activa cuando la URL trae ?borrar=NUMERO
-   ===================================================== */
-
+// eliminar movimiento (solo admin)
 if (isset($_GET["borrar"])) {
-
     if (!$esAdmin) {
-        $mensaje = "No tiene permiso para eliminar movimientos.";
+        $mensaje = "No tienes permiso para eliminar movimientos.";
         $tipoMensaje = "error";
-
     } else {
-        $codigo = intval($_GET["borrar"]);
-        $transaccionIniciada = false;
-
+        $codigo = (int)$_GET["borrar"];
+        $transaccion = false;
         try {
-            // Con la transaccion se borra TODO o no se borra NADA.
             $conn->begin_transaction();
-            $transaccionIniciada = true;
+            $transaccion = true;
 
-            // Primero los productos de la factura.
             $stmt = $conn->prepare("DELETE FROM detalle_salida WHERE cod_movimiento = ?");
             $stmt->bind_param("i", $codigo);
             $stmt->execute();
             $stmt->close();
 
-            // Despues la factura.
             $stmt = $conn->prepare("DELETE FROM factura_salida WHERE cod_movimiento = ?");
             $stmt->bind_param("i", $codigo);
             $stmt->execute();
-            $eliminado = $stmt->affected_rows;
             $stmt->close();
 
-            if ($eliminado == 0) {
-                throw new Exception("El movimiento no existe.");
-            }
-
             $conn->commit();
-            $transaccionIniciada = false;
-
-            header("Location: mov_salida.php?mensaje=eliminado");
+            header("Location: mov_salida.php?" . $parametros . "&mensaje=eliminado");
             exit();
-
-        } catch (Exception $ex) {
-            if ($transaccionIniciada) {
-                $conn->rollback();
-            }
-
-            $mensaje = "Error al eliminar: " . $ex->getMessage();
+        } catch (Exception $e) {
+            if ($transaccion) $conn->rollback();
+            $mensaje = "Error al eliminar: " . $e->getMessage();
             $tipoMensaje = "error";
         }
     }
 }
 
-// Aviso de eliminado (se muestra en rojo).
-if (isset($_GET["mensaje"]) && $_GET["mensaje"] == "eliminado" && $esAdmin) {
-    $mensaje = "Movimiento eliminado correctamente.";
-    $tipoMensaje = "error";
-}
-
-
-/* =====================================================
-   7. CARGAR UN MOVIMIENTO PARA EDITAR (SOLO ADMINISTRADOR)
-   Se activa cuando la URL trae ?editar=NUMERO
-   ===================================================== */
-
+// cargar movimiento para editar (solo admin)
 if (isset($_GET["editar"])) {
-
     if (!$esAdmin) {
-        $mensaje = "No tiene permiso para editar movimientos.";
+        $mensaje = "No tienes permiso para editar movimientos.";
         $tipoMensaje = "error";
-
     } else {
-        $codigo = intval($_GET["editar"]);
-
-        // Buscamos la factura.
+        $codigo = (int)$_GET["editar"];
         $stmt = $conn->prepare("SELECT * FROM factura_salida WHERE cod_movimiento = ?");
         $stmt->bind_param("i", $codigo);
         $stmt->execute();
@@ -421,1039 +288,700 @@ if (isset($_GET["editar"])) {
         $stmt->close();
 
         if ($factura_editar) {
-
-            // Buscamos los productos de la factura.
-            $stmt = $conn->prepare(
-                "SELECT * FROM detalle_salida
-                 WHERE cod_movimiento = ?
-                 ORDER BY id_detalle"
-            );
+            $stmt = $conn->prepare("SELECT * FROM detalle_salida WHERE cod_movimiento = ? ORDER BY id_detalle");
             $stmt->bind_param("i", $codigo);
             $stmt->execute();
-            $resDetalles = $stmt->get_result();
-
-            while ($detalle = $resDetalles->fetch_assoc()) {
-                $detalles_editar[] = $detalle;
+            $resDet = $stmt->get_result();
+            while ($d = $resDet->fetch_assoc()) {
+                $detalles_editar[] = $d;
             }
-
             $stmt->close();
 
-            // Buscamos el cliente para mostrarlo en el formulario.
-            $cedulaSeleccionada = $factura_editar["cedula_cliente"];
-
-            $stmt = $conn->prepare(
-                "SELECT cedula_cliente, nombre FROM cliente WHERE cedula_cliente = ?"
-            );
-            $stmt->bind_param("s", $cedulaSeleccionada);
+            $cedulaSeleccionada = (int) $factura_editar["cedula_cliente"];
+            $stmt = $conn->prepare("SELECT cedula_cliente, nombre FROM cliente WHERE cedula_cliente = ?");
+            $stmt->bind_param("i", $cedulaSeleccionada);
             $stmt->execute();
-            $clienteActual = $stmt->get_result()->fetch_assoc();
+            $cli = $stmt->get_result()->fetch_assoc();
             $stmt->close();
 
-            if ($clienteActual) {
-                $clienteSeleccionadoTexto = $clienteActual["cedula_cliente"] . " - " . $clienteActual["nombre"];
+            if ($cli) {
+                $clienteSeleccionadoTexto = $cli["cedula_cliente"] . " - " . $cli["nombre"];
             }
-
         } else {
-            $mensaje = "El movimiento que intenta editar no existe.";
+            $mensaje = "El movimiento a editar no existe.";
             $tipoMensaje = "error";
         }
     }
 }
 
+// guardar o actualizar movimiento
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    $accion = $_POST["accion"] ?? "";
+    $codigo = (int)($_POST["cod_movimiento"] ?? 0);
+    $cedula = trim((string)($_POST["cedula_cliente"] ?? ""));
 
-/* =====================================================
-   8. GUARDAR (EMPLEADO) O ACTUALIZAR (ADMINISTRADOR)
-   Se activa cuando se envia el formulario.
-   ===================================================== */
+    $codigos = $_POST["cod_producto"] ?? [];
+    $nombres = $_POST["nombre_producto"] ?? [];
+    $precios = $_POST["precio"] ?? [];
+    $cantidades = $_POST["cantidad"] ?? [];
 
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-
-    // Datos que llegan del formulario.
-    $accion = "";
-    if (isset($_POST["accion"])) {
-        $accion = $_POST["accion"];
-    }
-
-    $codigo = 0;
-    if (isset($_POST["cod_movimiento"])) {
-        $codigo = intval($_POST["cod_movimiento"]);
-    }
-
-    $cedula = "";
-    if (isset($_POST["cedula_cliente"])) {
-        $cedula = trim($_POST["cedula_cliente"]);
-    }
-
-    // Listas de productos (una posicion por cada fila).
-    $codigos = [];
-    if (isset($_POST["cod_producto"])) {
-        $codigos = $_POST["cod_producto"];
-    }
-
-    $nombres = [];
-    if (isset($_POST["nombre_producto"])) {
-        $nombres = $_POST["nombre_producto"];
-    }
-
-    $precios = [];
-    if (isset($_POST["precio"])) {
-        $precios = $_POST["precio"];
-    }
-
-    $cantidades = [];
-    if (isset($_POST["cantidad"])) {
-        $cantidades = $_POST["cantidad"];
-    }
-
-    // Revisamos que los datos basicos esten completos.
     if (
-        !is_array($codigos) ||
-        !is_array($nombres) ||
-        !is_array($precios) ||
-        !is_array($cantidades) ||
-        $cedula == "" ||
-        count($codigos) == 0 ||
-        count($codigos) != count($nombres) ||
-        count($codigos) != count($precios) ||
-        count($codigos) != count($cantidades)
+        !is_array($codigos) || count($codigos) === 0 ||
+        $cedula === "" || count($codigos) !== count($nombres) ||
+        count($codigos) !== count($precios) || count($codigos) !== count($cantidades)
     ) {
-        $mensaje = "Seleccione un cliente registrado y agregue al menos un producto.";
+        $mensaje = "Selecciona un cliente válido y agrega al menos un producto.";
         $tipoMensaje = "error";
-
     } else {
-        $transaccionIniciada = false;
-
+        $transaccion = false;
         try {
-            // Permisos:
-            // - Solo el administrador actualiza.
-            // - Solo el empleado guarda movimientos nuevos.
-            if ($accion == "actualizar" && !$esAdmin) {
-                throw new Exception("No tiene permiso para actualizar movimientos.");
+            if ($accion === "actualizar" && !$esAdmin) {
+                throw new Exception("No tienes permiso para actualizar movimientos.");
+            }
+            if ($accion === "guardar" && $esAdmin) {
+                throw new Exception("El administrador no registra nuevas salidas.");
             }
 
-            if ($accion == "guardar" && $esAdmin) {
-                throw new Exception("El administrador no registra salidas nuevas.");
-            }
-
-            // Iniciamos la transaccion (todo o nada).
             $conn->begin_transaction();
-            $transaccionIniciada = true;
+            $transaccion = true;
 
-            // --- Comprobar que el cliente exista ---
-            $stmt = $conn->prepare(
-                "SELECT cedula_cliente FROM cliente
-                 WHERE CAST(cedula_cliente AS CHAR) = ?"
-            );
-            $stmt->bind_param("s", $cedula);
+            // revisa que el cliente exista
+            $cedula = (int) $cedula;
+            $stmt = $conn->prepare("SELECT cedula_cliente FROM cliente WHERE cedula_cliente = ?");
+            $stmt->bind_param("i", $cedula);
             $stmt->execute();
-            $existeCliente = $stmt->get_result()->num_rows > 0;
+            if ($stmt->get_result()->num_rows === 0) {
+                $stmt->close();
+                throw new Exception("El cliente seleccionado no se encuentra registrado.");
+            }
             $stmt->close();
 
-            if (!$existeCliente) {
-                throw new Exception(
-                    "La cédula no corresponde a un cliente registrado. " .
-                    "Seleccione el cliente de las sugerencias."
-                );
-            }
-
-            // --- ACTUALIZAR una factura que ya existe ---
-            if ($accion == "actualizar") {
-
-                if ($codigo <= 0) {
-                    throw new Exception("Código de movimiento inválido.");
-                }
-
-                // Comprobamos que la factura exista.
-                $stmt = $conn->prepare(
-                    "SELECT cod_movimiento FROM factura_salida WHERE cod_movimiento = ?"
-                );
-                $stmt->bind_param("i", $codigo);
-                $stmt->execute();
-                $existeMovimiento = $stmt->get_result()->num_rows > 0;
-                $stmt->close();
-
-                if (!$existeMovimiento) {
-                    throw new Exception("El movimiento no existe.");
-                }
-
-                // Cambiamos el cliente de la factura.
-                $stmt = $conn->prepare(
-                    "UPDATE factura_salida
-                     SET cedula_cliente = ?, nota = ''
-                     WHERE cod_movimiento = ?"
-                );
-                $stmt->bind_param("si", $cedula, $codigo);
+            if ($accion === "actualizar") {
+                $stmt = $conn->prepare("UPDATE factura_salida SET cedula_cliente = ? WHERE cod_movimiento = ?");
+                $stmt->bind_param("ii", $cedula, $codigo);
                 $stmt->execute();
                 $stmt->close();
 
-                // Borramos los productos anteriores para guardar los nuevos.
-                // Asi el stock no cuenta dos veces lo que se edita.
                 $stmt = $conn->prepare("DELETE FROM detalle_salida WHERE cod_movimiento = ?");
                 $stmt->bind_param("i", $codigo);
                 $stmt->execute();
                 $stmt->close();
-
-            // --- GUARDAR una factura nueva ---
-            } elseif ($accion == "guardar") {
-
-                // Creamos la factura con la fecha de hoy.
-                $stmt = $conn->prepare(
-                    "INSERT INTO factura_salida (fecha, nota, cedula_cliente)
-                     VALUES (CURDATE(), '', ?)"
-                );
-                $stmt->bind_param("s", $cedula);
+            } else {
+                $stmt = $conn->prepare("INSERT INTO factura_salida (fecha, nota, cedula_cliente) VALUES (CURDATE(), '', ?)");
+                $stmt->bind_param("i", $cedula);
                 $stmt->execute();
-
-                // Codigo que MySQL le asigno automaticamente.
                 $codigo = $conn->insert_id;
                 $stmt->close();
-
-                if ($codigo <= 0) {
-                    throw new Exception("No se pudo generar el código del movimiento.");
-                }
-
-            } else {
-                throw new Exception("La acción solicitada no es válida.");
             }
 
-            // --- Consulta para guardar cada producto ---
+            // guarda cada producto en detalle_salida
             $stmtDetalle = $conn->prepare(
-                "INSERT INTO detalle_salida
-                 (cod_movimiento, cod_producto, nombre_producto, precio, cantidad)
+                "INSERT INTO detalle_salida (cod_movimiento, cod_producto, nombre_producto, precio, cantidad)
                  VALUES (?, ?, ?, ?, ?)"
             );
 
-            // --- Consulta para saber cuantas unidades hay disponibles ---
-            // (todo lo que entro) - (todo lo que salio)
+            // stock = entradas - salidas
             $consultaStock = $conn->prepare(
-                "SELECT
-                    COALESCE((
-                        SELECT SUM(me.cantidad)
-                        FROM mov_entrada me
-                        WHERE me.cod_producto = ?
-                    ), 0)
-                    -
-                    COALESCE((
-                        SELECT SUM(ds.cantidad)
-                        FROM detalle_salida ds
-                        INNER JOIN factura_salida fs
-                            ON fs.cod_movimiento = ds.cod_movimiento
-                        WHERE ds.cod_producto = ?
-                    ), 0) AS disponible"
+                "SELECT COALESCE((SELECT SUM(cantidad) FROM mov_entrada WHERE cod_producto = ?), 0) -
+                        COALESCE((SELECT SUM(ds.cantidad) FROM detalle_salida ds
+                                  INNER JOIN factura_salida fs ON fs.cod_movimiento = ds.cod_movimiento
+                                  WHERE ds.cod_producto = ?), 0) AS disponible"
             );
 
-            // --- Recorremos cada producto del formulario ---
             for ($i = 0; $i < count($codigos); $i++) {
+                $codP = filter_var($codigos[$i], FILTER_VALIDATE_INT);
+                $cantP = filter_var($cantidades[$i], FILTER_VALIDATE_INT);
+                $nomP = trim((string)$nombres[$i]);
+                $preP = (float)$precios[$i];
 
-                // Convertimos a numero entero (false si no es valido).
-                $codProducto = filter_var($codigos[$i], FILTER_VALIDATE_INT);
-                $cantidad = filter_var($cantidades[$i], FILTER_VALIDATE_INT);
-
-                $nombre = trim((string)$nombres[$i]);
-                $precioTexto = trim((string)$precios[$i]);
-
-                // Validamos los datos del producto.
-                if (
-                    $codProducto === false || $codProducto <= 0 ||
-                    $nombre == "" ||
-                    $precioTexto == "" || !is_numeric($precioTexto) ||
-                    (float)$precioTexto < 0 ||
-                    $cantidad === false || $cantidad <= 0
-                ) {
-                    throw new Exception("Revise el código, nombre, precio y cantidad de los productos.");
+                if (!$codP || $codP <= 0 || $nomP === "" || $preP < 0 || !$cantP || $cantP <= 0) {
+                    throw new Exception("Hay campos inválidos en la lista de productos.");
                 }
 
-                // Comprobamos que el producto exista.
-                $verificar = $conn->prepare(
-                    "SELECT cod_producto, nombre FROM producto WHERE cod_producto = ?"
-                );
-                $verificar->bind_param("i", $codProducto);
-                $verificar->execute();
-                $productoExiste = $verificar->get_result()->fetch_assoc();
-                $verificar->close();
-
-                if (!$productoExiste) {
-                    throw new Exception("No existe el producto con código " . $codProducto . ".");
-                }
-
-                // Calculamos cuantas unidades hay disponibles.
-                $consultaStock->bind_param("ii", $codProducto, $codProducto);
+                $consultaStock->bind_param("ii", $codP, $codP);
                 $consultaStock->execute();
-                $datosStock = $consultaStock->get_result()->fetch_assoc();
-                $disponible = (int)$datosStock["disponible"];
+                $disponible = (int)($consultaStock->get_result()->fetch_assoc()["disponible"] ?? 0);
 
-                // Si no hay nada disponible, no se puede sacar.
-                if ($disponible <= 0) {
-                    throw new Exception(
-                        "No se puede registrar la salida de " . $productoExiste["nombre"] .
-                        ": no tiene existencias disponibles. " .
-                        "Registre primero una entrada del producto."
-                    );
+                // no deja vender mas de lo que hay
+                if ($cantP > $disponible) {
+                    throw new Exception("Stock insuficiente para '{$nomP}'. Disponibles: {$disponible}.");
                 }
 
-                // Si piden mas de lo que hay, tampoco.
-                if ($cantidad > $disponible) {
-                    throw new Exception(
-                        "No hay suficientes existencias de " . $productoExiste["nombre"] .
-                        ". Disponibles: " . $disponible .
-                        ". Cantidad solicitada: " . $cantidad . "."
-                    );
-                }
-
-                // Guardamos el producto en la factura.
-                $precio = (float)$precioTexto;
-
-                // i = entero, s = texto, d = decimal.
-                $stmtDetalle->bind_param("iisdi", $codigo, $codProducto, $nombre, $precio, $cantidad);
+                $stmtDetalle->bind_param("iisdi", $codigo, $codP, $nomP, $preP, $cantP);
                 $stmtDetalle->execute();
             }
 
             $consultaStock->close();
             $stmtDetalle->close();
 
-            // Todo salio bien: confirmamos los cambios.
             $conn->commit();
-            $transaccionIniciada = false;
-
-            header("Location: mov_salida.php?guardado=" . urlencode((string)$codigo));
+            header("Location: mov_salida.php?" . $parametros . "&guardado=" . $codigo);
             exit();
-
-        } catch (Exception $ex) {
-            // Algo fallo: deshacemos todo.
-            if ($transaccionIniciada) {
-                $conn->rollback();
-            }
-
-            $mensaje = "No se pudo guardar el movimiento: " . $ex->getMessage();
+        } catch (Exception $e) {
+            if ($transaccion) $conn->rollback();
+            $mensaje = $e->getMessage();
             $tipoMensaje = "error";
         }
     }
 }
 
-// Aviso de guardado o actualizado (se muestra en verde).
-if (isset($_GET["guardado"]) && $tipoMensaje != "error") {
-    $mensaje = "Movimiento #" . (int)$_GET["guardado"] . " guardado o actualizado correctamente.";
-    $tipoMensaje = "bien";
+// mensajes que llegan por la url
+if (isset($_GET["mensaje"]) && $_GET["mensaje"] === "eliminado") {
+    $mensaje = "Movimiento eliminado correctamente.";
+    $tipoMensaje = "error";
+}
+if (isset($_GET["guardado"]) && $tipoMensaje !== "error") {
+    $codigoGuardado = (int)$_GET["guardado"];
+    $mensaje = "Movimiento #{$codigoGuardado} procesado exitosamente.";
+    $tipoMensaje = "ok";
 }
 
-// Codigo del movimiento recien guardado (para el boton "Generar factura").
-// Solo el empleado lo usa; el administrador no ve ese boton.
-$codigoRecienGuardado = 0;
-
-if (!$esAdmin && isset($_GET["guardado"]) && $tipoMensaje == "bien") {
-    $codigoRecienGuardado = (int)$_GET["guardado"];
-}
-
-
-/* =====================================================
-   9. CONSULTAS PARA LAS TABLAS (SOLO ADMINISTRADOR)
-   ===================================================== */
-
+// consultas de las tablas del admin
 if ($esAdmin) {
+    // total de salidas por producto
+    $resultadoResumen = $conn->query(
+        "SELECT d.cod_producto, d.nombre_producto, MAX(d.precio) AS precio_unitario, SUM(d.cantidad) AS cantidad_total
+         FROM detalle_salida d
+         INNER JOIN factura_salida f ON f.cod_movimiento = d.cod_movimiento
+         GROUP BY d.cod_producto, d.nombre_producto
+         ORDER BY d.nombre_producto ASC"
+    );
 
-    // ---------- Tabla de movimientos registrados ----------
+    // lista de facturas con su total
+    $sqlFacturas = "SELECT f.cod_movimiento, f.fecha, f.cedula_cliente, c.nombre AS nombre_cliente,
+                           COALESCE(SUM(d.precio * d.cantidad), 0) AS total,
+                           COUNT(d.id_detalle) AS numero_productos
+                    FROM factura_salida f
+                    LEFT JOIN cliente c ON f.cedula_cliente = c.cedula_cliente
+                    LEFT JOIN detalle_salida d ON f.cod_movimiento = d.cod_movimiento";
 
-    $sql = "SELECT
-                f.cod_movimiento,
-                f.fecha,
-                f.cedula_cliente,
-                c.nombre AS nombre_cliente,
-                COALESCE(SUM(d.precio * d.cantidad), 0) AS total,
-                COUNT(d.id_detalle) AS numero_productos
-            FROM factura_salida f
-            LEFT JOIN cliente c ON f.cedula_cliente = c.cedula_cliente
-            LEFT JOIN detalle_salida d ON f.cod_movimiento = d.cod_movimiento";
-
-    // Si escribio algo en el buscador, filtramos.
-    if ($busqueda != "") {
-        $sql = $sql . " WHERE
-                    CAST(f.cod_movimiento AS CHAR) LIKE ?
-                    OR CAST(f.cedula_cliente AS CHAR) LIKE ?
-                    OR f.fecha LIKE ?
-                    OR c.nombre LIKE ?
-                    OR EXISTS (
-                        SELECT 1
-                        FROM detalle_salida dx
-                        WHERE dx.cod_movimiento = f.cod_movimiento
-                        AND (
-                            dx.nombre_producto LIKE ?
-                            OR CAST(dx.cod_producto AS CHAR) LIKE ?
-                        )
-                    )";
+    if ($busqueda !== "") {
+        $sqlFacturas .= " WHERE CAST(f.cod_movimiento AS CHAR) LIKE ?
+                             OR CAST(f.cedula_cliente AS CHAR) LIKE ?
+                             OR f.fecha LIKE ?
+                             OR c.nombre LIKE ?";
     }
 
-    // Agrupamos por factura y ordenamos de la mas nueva a la mas antigua.
-    $sql = $sql . " GROUP BY f.cod_movimiento, f.fecha, f.cedula_cliente, c.nombre
-                    ORDER BY f.cod_movimiento DESC";
+    $sqlFacturas .= " GROUP BY f.cod_movimiento, f.fecha, f.cedula_cliente, c.nombre ORDER BY f.cod_movimiento DESC";
 
-    $stmtLista = $conn->prepare($sql);
-
-    // Si hay busqueda, llenamos los 6 signos ?
-    if ($busqueda != "") {
-        $texto = "%" . $busqueda . "%";
-        $stmtLista->bind_param("ssssss", $texto, $texto, $texto, $texto, $texto, $texto);
+    $stmtLista = $conn->prepare($sqlFacturas);
+    if ($busqueda !== "") {
+        $f = "%" . $busqueda . "%";
+        $stmtLista->bind_param("ssss", $f, $f, $f, $f);
     }
-
     $stmtLista->execute();
-    $resultado = $stmtLista->get_result();
-
-    // ---------- Tabla de resumen por producto ----------
-
-    $sqlResumen = "SELECT
-                        d.cod_producto,
-                        d.nombre_producto,
-                        MAX(d.precio) AS precio_unitario,
-                        SUM(d.cantidad) AS cantidad_total
-                   FROM detalle_salida d
-                   INNER JOIN factura_salida f ON f.cod_movimiento = d.cod_movimiento
-                   GROUP BY d.cod_producto, d.nombre_producto
-                   ORDER BY d.nombre_producto ASC";
-
-    $resultadoResumen = $conn->query($sqlResumen);
+    $resultadoFacturas = $stmtLista->get_result();
 }
 
-
-/* =====================================================
-   10. DATOS PARA DIBUJAR LA PAGINA
-   ===================================================== */
-
-// Empleado: siempre ve el formulario.
-// Administrador: solo cuando esta editando.
-$mostrarFormulario = (!$esAdmin || $factura_editar != null);
-
-// A donde se envia el formulario (asi no arrastra "?guardado=").
-if ($factura_editar) {
-    $accionFormulario = "mov_salida.php?editar=" . (int)$factura_editar["cod_movimiento"];
-} else {
-    $accionFormulario = "mov_salida.php";
-}
+$mostrarForm = (!$esAdmin || $factura_editar !== null);
+$codigoRecienGuardado = (!$esAdmin && isset($_GET["guardado"])) ? (int)$_GET["guardado"] : 0;
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Movimiento de salida</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movimiento de Salida | La Granja</title>
+    <link rel="stylesheet" href="css/mov_salida.css">
 </head>
-<body>
+<body class="pagina-salida">
 
-    <h2>MOVIMIENTO DE SALIDA</h2>
+<header class="encabezado">
+    <button type="button" class="boton-menu" id="abrirMenu" aria-label="Abrir menú lateral">
+        <?= icono("menu") ?>
+    </button>
+    <div class="encabezado-logo">
+        <img src="img/logo.png" alt="Logo de La Granja">
+    </div>
+    <div class="encabezado-texto">
+        <h1>Supermercado La Granja</h1>
+        <p>Sistema de gestión de inventario</p>
+    </div>
+    <div class="encabezado-usuario">
+        <span class="usuario-inicial"><?= escapar($inicial) ?></span>
+        <div>
+            <strong><?= escapar($usuario) ?></strong>
+            <p><?= escapar($nombreCargo) ?></p>
+        </div>
+    </div>
+</header>
 
-    <!-- Mensaje: verde si salio bien, rojo si es error o eliminado -->
-    <?php if ($mensaje != ""): ?>
-        <?php if ($tipoMensaje == "bien"): ?>
-            <p style="color: green;">
-                <strong><?php echo e($mensaje); ?></strong>
-            </p>
-        <?php else: ?>
-            <p style="color: red;">
-                <strong><?php echo e($mensaje); ?></strong>
-            </p>
-        <?php endif; ?>
+<div class="fondo-menu" id="fondoMenu"></div>
+
+<aside class="menu-lateral" id="menuLateral">
+    <div class="menu-lateral-encabezado">
+        <div class="menu-lateral-marca">
+            <img src="img/logo.png" alt="Logo de La Granja">
+            <div>
+                <h2>Supermercado</h2>
+                <p>La Granja</p>
+            </div>
+        </div>
+        <button type="button" class="boton-cerrar" id="cerrarMenu" aria-label="Cerrar menú lateral">
+            <?= icono("cerrar") ?>
+        </button>
+    </div>
+
+    <div class="menu-lateral-usuario">
+        <div class="usuario-inicial usuario-grande"><?= escapar($inicial) ?></div>
+        <div>
+            <strong><?= escapar($usuario) ?></strong>
+            <p><?= escapar($nombreCargo) ?></p>
+        </div>
+    </div>
+
+    <nav class="navegacion">
+        <p class="titulo-navegacion">MENÚ PRINCIPAL</p>
+        <div class="lista-navegacion">
+            <a href="menu.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                <span class="caja-icono"><?= icono("inicio") ?></span>
+                <span>Inicio</span>
+            </a>
+            <a href="cliente.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                <span class="caja-icono"><?= icono("cliente") ?></span>
+                <span>Cliente</span>
+            </a>
+            <a href="mov_salida.php?<?= $parametrosHtml ?>" class="enlace-menu activo" aria-current="page">
+                <span class="caja-icono"><?= icono("salida") ?></span>
+                <span>Movimiento de salida</span>
+            </a>
+            <?php if ($esAdmin): ?>
+                <a href="producto.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                    <span class="caja-icono"><?= icono("producto") ?></span>
+                    <span>Productos</span>
+                </a>
+                <a href="mov_entrada.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                    <span class="caja-icono"><?= icono("entrada") ?></span>
+                    <span>Movimiento de entrada</span>
+                </a>
+                <a href="proveedor.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                    <span class="caja-icono"><?= icono("proveedor") ?></span>
+                    <span>Proveedor</span>
+                </a>
+                <a href="inventario.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                    <span class="caja-icono"><?= icono("inventario") ?></span>
+                    <span>Inventario</span>
+                </a>
+                <a href="reportes.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                    <span class="caja-icono"><?= icono("reportes") ?></span>
+                    <span>Reportes</span>
+                </a>
+                <a href="edita_usuario.php?<?= $parametrosHtml ?>" class="enlace-menu">
+                    <span class="caja-icono"><?= icono("usuario") ?></span>
+                    <span>Modificar usuario</span>
+                </a>
+            <?php endif; ?>
+        </div>
+    </nav>
+
+    <form action="menu.php?<?= $parametrosHtml ?>" method="POST" class="form-salir">
+        <button type="submit" name="salir" value="1" class="boton-salir">
+            <span class="caja-icono caja-icono-roja"><?= icono("salir") ?></span>
+            <span>Cerrar sesión</span>
+        </button>
+    </form>
+</aside>
+
+<main class="contenido">
+    <section class="titulo-pagina">
+        <span class="titulo-icono"><?= icono("salida") ?></span>
+        <div>
+            <h2>Movimiento de Salida</h2>
+            <p><?= $esAdmin ? "Consulta, edita o elimina los movimientos de salida registrados." : "Registra salidas de productos e imprime facturas de venta." ?></p>
+        </div>
+    </section>
+
+    <?php if ($mensaje !== ""): ?>
+        <div class="mensaje mensaje-<?= escapar($tipoMensaje) ?>" role="status">
+            <?= escapar($mensaje) ?>
+        </div>
     <?php endif; ?>
 
-
-    <!-- =====================================================
-         FORMULARIO (empleado siempre; administrador al editar)
-         ===================================================== -->
-    <?php if ($mostrarFormulario): ?>
-
-        <h3>
-            <?php
-            if ($factura_editar) {
-                echo "Editar movimiento";
-            } else {
-                echo "Registrar movimiento";
-            }
-            ?>
-        </h3>
-
-        <form method="POST" id="formularioFactura" action="<?php echo e($accionFormulario); ?>">
-
-            <!-- Le dice a PHP si se guarda uno nuevo o se actualiza uno existente -->
-            <input type="hidden" name="accion"
-                   value="<?php echo $factura_editar ? "actualizar" : "guardar"; ?>">
-
-            <!-- Al editar, tambien enviamos el codigo de la factura -->
-            <?php if ($factura_editar): ?>
-                <input type="hidden" name="cod_movimiento"
-                       value="<?php echo e($factura_editar["cod_movimiento"]); ?>">
-            <?php endif; ?>
-
-            <label>Código de movimiento:</label><br>
-            <input type="text" readonly
-                   value="<?php
-                   if ($factura_editar) {
-                       echo e($factura_editar["cod_movimiento"]);
-                   } else {
-                       echo "Automático al guardar";
-                   }
-                   ?>">
-            <br><br>
-
-            <label>Fecha:</label><br>
-            <input type="date" readonly
-                   value="<?php
-                   if ($factura_editar) {
-                       echo e($factura_editar["fecha"]);
-                   } else {
-                       echo date("Y-m-d");
-                   }
-                   ?>">
-            <br><br>
-
-            <!-- Cliente: se escribe cedula o nombre y salen sugerencias -->
-            <label>Cédula o nombre del cliente:</label><br>
-            <input type="text"
-                   id="cliente_busqueda"
-                   list="lista_clientes"
-                   autocomplete="off"
-                   placeholder="Escriba la cédula o el nombre"
-                   value="<?php echo e($clienteSeleccionadoTexto); ?>"
-                   required>
-
-            <!-- Aqui JavaScript pone las sugerencias -->
-            <datalist id="lista_clientes"></datalist>
-
-            <!-- Campo oculto: la cedula que realmente se envia -->
-            <input type="hidden" name="cedula_cliente" id="cedula_cliente"
-                   value="<?php echo e($cedulaSeleccionada); ?>">
-
-            <p id="estado_cliente"></p>
-
-            <h3>Productos de salida</h3>
-
-            <table border="1" cellpadding="5" cellspacing="0">
-                <thead>
-                    <tr>
-                        <th>Código</th>
-                        <th>Nombre del producto</th>
-                        <th>Precio unitario</th>
-                        <th>Cantidad</th>
-                        <th>Subtotal</th>
-                        <th>Acción</th>
-                    </tr>
-                </thead>
-
-                <!-- Las filas de productos se agregan aqui -->
-                <tbody id="productos">
-                    <?php /* Al editar, mostramos los productos que ya tenia la factura */ ?>
-                    <?php foreach ($detalles_editar as $detalle): ?>
-                        <tr>
-                            <td>
-                                <input class="codigo" type="number" name="cod_producto[]"
-                                       min="1" required
-                                       value="<?php echo e($detalle["cod_producto"]); ?>">
-                            </td>
-                            <td>
-                                <input class="nombre-producto" type="text" name="nombre_producto[]"
-                                       required
-                                       value="<?php echo e($detalle["nombre_producto"]); ?>">
-                            </td>
-                            <td>
-                                <input class="precio" type="number" name="precio[]"
-                                       min="0" step="0.01" required
-                                       value="<?php echo e($detalle["precio"]); ?>">
-                            </td>
-                            <td>
-                                <input class="cantidad" type="number" name="cantidad[]"
-                                       min="1" step="1" required
-                                       value="<?php echo e($detalle["cantidad"]); ?>">
-                            </td>
-                            <td class="subtotal">$0</td>
-                            <td>
-                                <button type="button" class="quitar">Quitar</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-
-                <tfoot>
-                    <tr>
-                        <th colspan="4">TOTAL</th>
-                        <th id="totalFactura">$0</th>
-                        <th></th>
-                    </tr>
-                </tfoot>
-            </table>
-
-            <br>
-
-            <button type="button" onclick="agregarProducto()">Agregar producto</button>
-
-            <br><br>
-
-            <!-- Boton de guardar o actualizar -->
-            <button type="submit">
-                <?php
-                if ($factura_editar) {
-                    echo "Actualizar movimiento";
-                } else {
-                    echo "Guardar movimiento";
-                }
-                ?>
-            </button>
-
-            <!-- Al lado de guardar: "Generar factura" (solo empleado, despues de guardar).
-                 Asi el empleado elige si imprime o no. -->
-            <?php if ($codigoRecienGuardado > 0): ?>
-                <button type="button" onclick="generarFactura(<?php echo $codigoRecienGuardado; ?>)">
-                    Generar factura
-                </button>
-            <?php endif; ?>
-
-            <?php if ($factura_editar): ?>
-                <a href="mov_salida.php">Cancelar edición</a>
-            <?php endif; ?>
-
-        </form>
-
-        <script>
-            // =====================================================
-            // JAVASCRIPT DEL FORMULARIO (corre en el navegador)
-            // =====================================================
-
-            // Elementos de la pagina que vamos a usar.
-            const campoCliente = document.getElementById("cliente_busqueda");
-            const campoCedula = document.getElementById("cedula_cliente");
-            const listaClientes = document.getElementById("lista_clientes");
-            const estadoCliente = document.getElementById("estado_cliente");
-
-            // Sirve para ignorar respuestas viejas si el usuario sigue escribiendo.
-            let consultaClientes = 0;
-
-
-            // Convierte un numero a pesos. Ejemplo: 1500 -> $1.500
-            function formato(valor) {
-                return valor.toLocaleString("es-CO", {
-                    style: "currency",
-                    currency: "COP",
-                    maximumFractionDigits: 2
-                });
-            }
-
-
-            // Carga la factura en el marco oculto y se imprime sola.
-            // El "&t=" evita que el navegador repita la carga anterior.
-            function generarFactura(codigo) {
-                const marco = document.getElementById("marcoFactura");
-                marco.src = "mov_salida.php?factura=" + encodeURIComponent(codigo) + "&t=" + Date.now();
-            }
-
-
-            // ---------- Sugerencias de clientes mientras se escribe ----------
-            campoCliente.addEventListener("input", async function () {
-
-                // Si cambia el texto, la cedula elegida ya no sirve.
-                campoCedula.value = "";
-                estadoCliente.textContent = "";
-
-                const texto = campoCliente.value.trim();
-                consultaClientes = consultaClientes + 1;
-                const consultaActual = consultaClientes;
-
-                // Si borro todo, vaciamos las sugerencias.
-                if (texto == "") {
-                    listaClientes.replaceChildren();
-                    return;
-                }
-
-                try {
-                    const respuesta = await fetch("mov_salida.php?buscar_cliente=" + encodeURIComponent(texto));
-
-                    if (!respuesta.ok) {
-                        throw new Error("No se pudo buscar el cliente.");
-                    }
-
-                    const clientes = await respuesta.json();
-
-                    // Si ya escribio otra cosa, ignoramos esta respuesta.
-                    if (consultaActual != consultaClientes) {
-                        return;
-                    }
-
-                    // Llenamos la lista de sugerencias.
-                    listaClientes.replaceChildren();
-
-                    clientes.forEach(function (cliente) {
-                        const opcion = document.createElement("option");
-                        opcion.value = cliente.cedula + " - " + cliente.nombre;
-                        listaClientes.appendChild(opcion);
-                    });
-
-                } catch (error) {
-                    estadoCliente.textContent = "Error al buscar clientes.";
-                    console.error(error);
-                }
-            });
-
-
-            // ---------- Confirmar que el cliente escrito si existe ----------
-            // Devuelve true si el cliente es valido y false si no.
-            async function resolverCliente() {
-                const texto = campoCliente.value.trim();
-
-                if (texto == "") {
-                    campoCedula.value = "";
-                    estadoCliente.textContent = "Escriba la cédula o el nombre del cliente.";
-                    return false;
-                }
-
-                try {
-                    const respuesta = await fetch("mov_salida.php?buscar_cliente=" + encodeURIComponent(texto));
-
-                    if (!respuesta.ok) {
-                        throw new Error("Error al consultar el cliente.");
-                    }
-
-                    const clientes = await respuesta.json();
-
-                    // Buscamos el cliente que coincida con lo escrito.
-                    const cliente = clientes.find(function (c) {
-                        const cedula = String(c.cedula).trim();
-                        const nombre = String(c.nombre).trim();
-
-                        return texto == cedula ||
-                               texto.toLowerCase() == nombre.toLowerCase() ||
-                               texto == cedula + " - " + nombre;
-                    });
-
-                    if (!cliente) {
-                        campoCedula.value = "";
-                        estadoCliente.textContent = "Cliente no encontrado. Seleccione un cliente registrado.";
-                        return false;
-                    }
-
-                    // Cliente valido: guardamos su cedula en el campo oculto.
-                    campoCedula.value = String(cliente.cedula);
-                    campoCliente.value = cliente.cedula + " - " + cliente.nombre;
-                    estadoCliente.textContent = "Cliente seleccionado: " + cliente.nombre;
-                    return true;
-
-                } catch (error) {
-                    campoCedula.value = "";
-                    estadoCliente.textContent = "No se pudo verificar el cliente.";
-                    console.error(error);
-                    return false;
-                }
-            }
-
-            // Cuando termina de escribir el cliente, lo verificamos.
-            campoCliente.addEventListener("change", resolverCliente);
-
-
-            // ---------- Filas de productos ----------
-
-            // Le da vida a una fila: buscar producto, recalcular y quitar.
-            function conectarFila(fila) {
-                const codigo = fila.querySelector(".codigo");
-                const nombre = fila.querySelector(".nombre-producto");
-                const precio = fila.querySelector(".precio");
-                const cantidad = fila.querySelector(".cantidad");
-                const quitar = fila.querySelector(".quitar");
-
-                // Al cambiar el codigo, buscamos el producto.
-                codigo.addEventListener("change", function () {
-                    buscarProducto(fila);
-                });
-
-                // Si pulsa Enter en el codigo, buscamos sin enviar el formulario.
-                codigo.addEventListener("keydown", function (evento) {
-                    if (evento.key == "Enter") {
-                        evento.preventDefault();
-                        buscarProducto(fila);
-                    }
-                });
-
-                // Al cambiar nombre, precio o cantidad, recalculamos.
-                nombre.addEventListener("input", calcularTotal);
-                precio.addEventListener("input", calcularTotal);
-                cantidad.addEventListener("input", calcularTotal);
-
-                // Boton Quitar: elimina la fila y recalcula.
-                quitar.addEventListener("click", function () {
-                    fila.remove();
-                    calcularTotal();
-                });
-            }
-
-
-            // Agrega una fila vacia a la tabla de productos.
-            function agregarProducto() {
-                const fila = document.createElement("tr");
-
-                fila.innerHTML = `
-                    <td><input class="codigo" type="number" name="cod_producto[]" min="1" required></td>
-                    <td><input class="nombre-producto" type="text" name="nombre_producto[]" required></td>
-                    <td><input class="precio" type="number" name="precio[]" min="0" step="0.01" required></td>
-                    <td><input class="cantidad" type="number" name="cantidad[]" min="1" step="1" value="1" required></td>
-                    <td class="subtotal">$0</td>
-                    <td><button type="button" class="quitar">Quitar</button></td>
-                `;
-
-                document.getElementById("productos").appendChild(fila);
-
-                conectarFila(fila);
-                calcularTotal();
-            }
-
-
-            // Busca el producto por su codigo y rellena nombre y precio.
-            async function buscarProducto(fila) {
-                const campoCodigo = fila.querySelector(".codigo");
-                const campoNombre = fila.querySelector(".nombre-producto");
-                const campoPrecio = fila.querySelector(".precio");
-
-                const codigo = campoCodigo.value.trim();
-
-                // Si borro el codigo, vaciamos nombre y precio.
-                if (codigo == "") {
-                    campoNombre.value = "";
-                    campoPrecio.value = "";
-                    calcularTotal();
-                    return;
-                }
-
-                try {
-                    const respuesta = await fetch("mov_salida.php?producto_codigo=" + encodeURIComponent(codigo));
-
-                    if (!respuesta.ok) {
-                        throw new Error("No se pudo consultar el producto.");
-                    }
-
-                    const producto = await respuesta.json();
-
-                    if (!producto.existe) {
-                        campoNombre.value = "";
-                        campoPrecio.value = "";
-                        calcularTotal();
-                        alert("No existe un producto con ese código.");
-                        return;
-                    }
-
-                    // Rellenamos la fila con los datos del producto.
-                    campoCodigo.value = producto.codigo;
-                    campoNombre.value = producto.nombre;
-                    campoPrecio.value = producto.precio;
-                    calcularTotal();
-
-                } catch (error) {
-                    console.error(error);
-                    alert("No se pudo consultar el producto.");
-                }
-            }
-
-
-            // ---------- Calculo de subtotales y total ----------
-            function calcularTotal() {
-                let total = 0;
-
-                // Recorremos cada fila de la tabla.
-                document.querySelectorAll("#productos tr").forEach(function (fila) {
-                    const precio = parseFloat(fila.querySelector(".precio").value) || 0;
-                    const cantidad = parseInt(fila.querySelector(".cantidad").value) || 0;
-
-                    const subtotal = precio * cantidad;
-
-                    fila.querySelector(".subtotal").textContent = formato(subtotal);
-                    total = total + subtotal;
-                });
-
-                document.getElementById("totalFactura").textContent = formato(total);
-            }
-
-
-            // ---------- Validar antes de enviar el formulario ----------
-            document.getElementById("formularioFactura").addEventListener("submit", async function (evento) {
-
-                // Detenemos el envio para revisar primero.
-                evento.preventDefault();
-
-                // 1. El cliente debe existir.
-                const clienteValido = await resolverCliente();
-
-                if (!clienteValido) {
-                    alert("Seleccione un cliente registrado de las sugerencias.");
-                    campoCliente.focus();
-                    return;
-                }
-
-                // 2. Debe haber al menos un producto.
-                const filas = document.querySelectorAll("#productos tr");
-
-                if (filas.length == 0) {
-                    alert("Agregue al menos un producto.");
-                    return;
-                }
-
-                // 3. Cada producto debe tener datos correctos.
-                for (const fila of filas) {
-                    const codigo = fila.querySelector(".codigo").value.trim();
-                    const nombre = fila.querySelector(".nombre-producto").value.trim();
-                    const precioTexto = fila.querySelector(".precio").value;
-                    const cantidadTexto = fila.querySelector(".cantidad").value;
-
-                    const precio = Number(precioTexto);
-                    const cantidad = Number(cantidadTexto);
-
-                    if (
-                        codigo == "" || Number(codigo) <= 0 ||
-                        nombre == "" ||
-                        precioTexto == "" || !Number.isFinite(precio) || precio < 0 ||
-                        cantidadTexto == "" || !Number.isInteger(cantidad) || cantidad < 1
-                    ) {
-                        alert("Revise el código, nombre, precio y cantidad.");
-                        return;
-                    }
-                }
-
-                // Todo bien: enviamos el formulario.
-                // (PHP revisa las existencias otra vez antes de guardar.)
-                this.submit();
-            });
-
-
-            // ---------- Al cargar la pagina ----------
-
-            // Si estamos editando, activamos las filas que PHP ya dibujo.
-            document.querySelectorAll("#productos tr").forEach(function (fila) {
-                conectarFila(fila);
-            });
-
-            // Si no hay ninguna fila (registro nuevo), creamos una vacia.
-            if (document.querySelectorAll("#productos tr").length == 0) {
-                agregarProducto();
-            }
-
-            calcularTotal();
-        </script>
-
-    <?php endif; // fin del formulario ?>
-
-
-    <!-- =====================================================
-         TABLAS (solo administrador)
-         ===================================================== -->
-    <?php if ($esAdmin): ?>
-
-        <!-- Tabla 1: unidades que salieron de cada producto -->
-        <h3>Movimiento de salida de Productos</h3>
-
-        <table border="1" cellpadding="5" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Código del producto</th>
-                    <th>Nombre del producto</th>
-                    <th>Precio unitario</th>
-                    <th>Cantidad total de salida</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php while ($producto = $resultadoResumen->fetch_assoc()): ?>
-                    <tr>
-                        <td><?php echo e($producto["cod_producto"]); ?></td>
-                        <td><?php echo e($producto["nombre_producto"]); ?></td>
-                        <td><?php echo formatoMoneda($producto["precio_unitario"]); ?></td>
-                        <td><?php echo e($producto["cantidad_total"]); ?></td>
-                    </tr>
-                <?php endwhile; ?>
-            </tbody>
-        </table>
-
-        <hr>
-
-        <!-- Tabla 2: facturas con buscador -->
-        <h3>Movimientos registrados por cliente</h3>
-
-        <form method="GET">
-            <label>Buscar movimiento o cliente:</label>
-            <input type="text" name="buscar"
-                   value="<?php echo e($busqueda); ?>"
-                   placeholder="Código, cédula, cliente o producto">
-            <button type="submit">Buscar</button>
-            <a href="mov_salida.php">Mostrar todos</a>
-        </form>
-
-        <br>
-
-        <table border="1" cellpadding="5" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Código de movimiento</th>
-                    <th>Fecha</th>
-                    <th>Cédula - Cliente</th>
-                    <th>Productos</th>
-                    <th>Total</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if ($resultado->num_rows > 0): ?>
-                    <?php while ($fila = $resultado->fetch_assoc()): ?>
-                        <tr>
-                            <td><?php echo e($fila["cod_movimiento"]); ?></td>
-                            <td><?php echo e($fila["fecha"]); ?></td>
-                            <td>
-                                <?php
-                                $nombreCliente = "Sin nombre";
-                                if ($fila["nombre_cliente"] != null) {
-                                    $nombreCliente = $fila["nombre_cliente"];
-                                }
-
-                                echo e($fila["cedula_cliente"]) . " - " . e($nombreCliente);
-                                ?>
-                            </td>
-                            <td><?php echo e($fila["numero_productos"]); ?></td>
-                            <td><?php echo formatoMoneda($fila["total"]); ?></td>
-                            <td>
-                                <!-- Boton para generar la factura de este movimiento -->
-                                <form method="GET" action="mov_salida.php" target="marcoFactura">
-                                    <input type="hidden" name="factura"
-                                           value="<?php echo e($fila["cod_movimiento"]); ?>">
-                                    <button type="submit">Factura</button>
-                                </form>
-
-                                |
-
-                                <a href="?editar=<?php echo e($fila["cod_movimiento"]); ?>">Editar</a>
-
-                                |
-
-                                <a href="?borrar=<?php echo e($fila["cod_movimiento"]); ?>"
-                                   onclick="return confirm('¿Está segura de eliminar este movimiento?');">
-                                    Eliminar
-                                </a>
-                            </td>
-                        </tr>
-                    <?php endwhile; ?>
-                <?php else: ?>
-                    <tr>
-                        <td colspan="6">No se encontraron movimientos.</td>
-                    </tr>
+    <!-- formulario de salida -->
+    <?php if ($mostrarForm): ?>
+        <section class="panel">
+            <h3 class="panel-titulo"><?= $factura_editar ? "Editar Movimiento #".escapar($factura_editar["cod_movimiento"]) : "Registrar Salida de Productos" ?></h3>
+
+            <form method="POST" id="formularioFactura" action="mov_salida.php?<?= $parametrosHtml ?>" class="formulario">
+                <input type="hidden" name="accion" value="<?= $factura_editar ? "actualizar" : "guardar" ?>">
+                <?php if ($factura_editar): ?>
+                    <input type="hidden" name="cod_movimiento" value="<?= escapar($factura_editar["cod_movimiento"]) ?>">
                 <?php endif; ?>
-            </tbody>
-        </table>
 
-    <?php endif; // fin de las tablas del administrador ?>
+                <div class="campo">
+                    <label>Código de movimiento</label>
+                    <input type="text" readonly value="<?= $factura_editar ? escapar($factura_editar["cod_movimiento"]) : "Automático al guardar" ?>">
+                </div>
 
-    <br>
+                <div class="campo">
+                    <label>Fecha de emisión</label>
+                    <input type="date" readonly value="<?= $factura_editar ? escapar($factura_editar["fecha"]) : date("Y-m-d") ?>">
+                </div>
 
-    <!-- Marco oculto: carga la factura sin cambiar de pagina -->
-    <iframe name="marcoFactura" id="marcoFactura" title="Factura para imprimir"
-            style="display: none;"></iframe>
+                <div class="campo campo-ancho">
+                    <label for="cliente_busqueda">Cédula o Nombre del Cliente</label>
+                    <input type="text" id="cliente_busqueda" list="lista_clientes" autocomplete="off" placeholder="Escriba para buscar cliente..." value="<?= escapar($clienteSeleccionadoTexto) ?>" required>
+                    <datalist id="lista_clientes"></datalist>
+                    <input type="hidden" name="cedula_cliente" id="cedula_cliente" value="<?= escapar($cedulaSeleccionada) ?>">
+                    <p id="estado_cliente" class="estado-texto"></p>
+                </div>
 
-    <!-- Boton para volver al menu -->
-    <form action="menu.php" method="GET">
-        <button type="submit">Menú principal</button>
-    </form>
+                <div class="campo campo-ancho" style="margin-top:10px;">
+                    <label>Detalle de Productos</label>
+                    <div class="tabla-contenedor">
+                        <table class="tabla">
+                            <thead>
+                                <tr>
+                                    <th style="width: 15%;">Código</th>
+                                    <th>Producto</th>
+                                    <th style="width: 18%;" class="derecha">Precio Unitario</th>
+                                    <th style="width: 15%;" class="derecha">Cantidad</th>
+                                    <th style="width: 18%;" class="derecha">Subtotal</th>
+                                    <th style="width: 10%;">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="productos">
+                                <?php foreach ($detalles_editar as $detalle): ?>
+                                    <tr>
+                                        <td>
+                                            <input class="codigo" type="number" name="cod_producto[]" min="1" required value="<?= escapar($detalle["cod_producto"]) ?>">
+                                        </td>
+                                        <td>
+                                            <input class="nombre-producto" type="text" name="nombre_producto[]" required value="<?= escapar($detalle["nombre_producto"]) ?>">
+                                        </td>
+                                        <td>
+                                            <input class="precio" type="number" name="precio[]" min="0" step="0.01" required value="<?= escapar($detalle["precio"]) ?>">
+                                        </td>
+                                        <td>
+                                            <input class="cantidad" type="number" name="cantidad[]" min="1" step="1" required value="<?= escapar($detalle["cantidad"]) ?>">
+                                        </td>
+                                        <td class="subtotal derecha">$0</td>
+                                        <td>
+                                            <button type="button" class="boton boton-chico boton-eliminar quitar">Quitar</button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <th colspan="4" class="derecha total">TOTAL</th>
+                                    <th id="totalFactura" class="derecha total">$0</th>
+                                    <th></th>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
 
-</body>
-</html>
-<?php
-// Cerramos la consulta de la lista (solo existe para el administrador).
-if (isset($stmtLista)) {
-    $stmtLista->close();
+                <div class="botones campo-ancho">
+                    <button type="button" class="boton boton-secundario" onclick="agregarProducto()">+ Agregar producto</button>
+                    <button type="submit" class="boton boton-principal"><?= $factura_editar ? "Actualizar Movimiento" : "Guardar Movimiento" ?></button>
+                    <?php if ($codigoRecienGuardado > 0): ?>
+                        <button type="button" class="boton boton-factura" onclick="generarFactura(<?= $codigoRecienGuardado ?>)">Generar Factura</button>
+                    <?php endif; ?>
+                    <?php if ($factura_editar): ?>
+                        <a href="mov_salida.php?<?= $parametrosHtml ?>" class="boton boton-secundario">Cancelar</a>
+                    <?php endif; ?>
+                </div>
+            </form>
+        </section>
+    <?php endif; ?>
+
+    <!-- tablas del admin -->
+    <?php if ($esAdmin): ?>
+        <section class="panel">
+            <h3 class="panel-titulo">Resumen Consolidado de Salidas por Producto</h3>
+            <div class="tabla-contenedor">
+                <table class="tabla">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Nombre del Producto</th>
+                            <th class="derecha">Precio Unitario Ref.</th>
+                            <th class="derecha">Cantidad Total Salida</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($resultadoResumen && $resultadoResumen->num_rows > 0): ?>
+                            <?php while ($prod = $resultadoResumen->fetch_assoc()): ?>
+                                <tr>
+                                    <td><?= escapar($prod["cod_producto"]) ?></td>
+                                    <td><?= escapar($prod["nombre_producto"]) ?></td>
+                                    <td class="derecha"><?= formatoMoneda($prod["precio_unitario"]) ?></td>
+                                    <td class="derecha"><?= escapar($prod["cantidad_total"]) ?></td>
+                                </tr>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="4" class="tabla-vacia">No hay movimientos registrados.</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h3 class="panel-titulo">Buscar Movimientos Registrados</h3>
+            <form method="GET" action="mov_salida.php" class="buscador">
+                <input type="hidden" name="usuario" value="<?= htmlspecialchars($usuario, ENT_QUOTES, "UTF-8") ?>">
+                <input type="hidden" name="rol" value="<?= htmlspecialchars($cargo, ENT_QUOTES, "UTF-8") ?>">
+                <input type="text" name="buscar" placeholder="Código, cédula o cliente..." value="<?= escapar($busqueda) ?>">
+                <button type="submit" class="boton boton-principal">Buscar</button>
+                <?php if ($busqueda !== ""): ?>
+                    <a href="mov_salida.php?<?= $parametrosHtml ?>" class="boton boton-secundario">Mostrar Todos</a>
+                <?php endif; ?>
+            </form>
+        </section>
+
+        <section class="panel">
+            <h3 class="panel-titulo">Historial de Salidas / Facturas</h3>
+            <div class="tabla-contenedor">
+                <table class="tabla">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Fecha</th>
+                            <th>Cédula - Cliente</th>
+                            <th class="derecha">Productos</th>
+                            <th class="derecha">Total Venta</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($resultadoFacturas && $resultadoFacturas->num_rows > 0): ?>
+                            <?php while ($fila = $resultadoFacturas->fetch_assoc()): ?>
+                                <tr>
+                                    <td><?= escapar($fila["cod_movimiento"]) ?></td>
+                                    <td><?= escapar($fila["fecha"]) ?></td>
+                                    <td><?= escapar($fila["cedula_cliente"]) . " - " . escapar($fila["nombre_cliente"] ?? "Sin Nombre") ?></td>
+                                    <td class="derecha"><?= escapar($fila["numero_productos"]) ?></td>
+                                    <td class="derecha"><?= formatoMoneda($fila["total"]) ?></td>
+                                    <td class="tabla-acciones">
+                                        <button type="button" class="boton boton-chico boton-factura" onclick="generarFactura(<?= $fila['cod_movimiento'] ?>)">Factura</button>
+                                        <a href="mov_salida.php?<?= $parametrosHtml ?>&amp;editar=<?= $fila['cod_movimiento'] ?>" class="boton boton-chico boton-editar">Editar</a>
+                                        <a href="mov_salida.php?<?= $parametrosHtml ?>&amp;borrar=<?= $fila['cod_movimiento'] ?>" class="boton boton-chico boton-eliminar" onclick="return confirm('¿Seguro que deseas eliminar este movimiento?');">Eliminar</a>
+                                    </td>
+                                </tr>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="6" class="tabla-vacia">No se encontraron registros de salidas.</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    <?php endif; ?>
+</main>
+
+<iframe name="marcoFactura" id="marcoFactura" title="Factura" style="display: none;"></iframe>
+
+<footer class="pie-pagina">
+    <div class="footer-contenido">
+        <section class="footer-ayuda">
+            <h4>AYUDA Y SOPORTE</h4>
+            <p class="footer-descripcion">Encuentra orientación para utilizar correctamente el sistema de gestión de inventario.</p>
+            <a href="ayuda.php?<?= $parametrosHtml ?>" class="footer-enlace"><span class="footer-icono">ⓘ</span>Centro de ayuda</a>
+            <a href="ayuda.php?<?= $parametrosHtml ?>#privacidad" class="footer-enlace"><span class="footer-icono">♧</span>Privacidad y seguridad</a>
+            <a href="ayuda.php?<?= $parametrosHtml ?>#uso" class="footer-enlace"><span class="footer-icono">▤</span>Manual de uso del sistema</a>
+            <a href="ayuda.php?<?= $parametrosHtml ?>#soporte" class="footer-enlace"><span class="footer-icono">?</span>Asistencia técnica</a>
+            <a href="ayuda.php?<?= $parametrosHtml ?>#inventario" class="footer-enlace"><span class="footer-icono">▣</span>Gestión y control de inventario</a>
+            <a href="ayuda.php?<?= $parametrosHtml ?>#movimientos" class="footer-enlace"><span class="footer-icono">↔</span>Movimientos de entrada y salida</a>
+        </section>
+
+        <section class="footer-informacion">
+            <h4>INFORMACIÓN DEL SISTEMA</h4>
+            <p><strong>Plataforma administrativa</strong><br>Herramienta para organizar y controlar los productos del supermercado.</p>
+            <p><strong>Gestión de clientes</strong><br>Registro, consulta y actualización de la información de los clientes.</p>
+            <p><strong>Control de movimientos</strong><br>Seguimiento de las entradas y salidas de mercancía.</p>
+            <div class="footer-nota">
+                <strong>Uso del sistema</strong>
+                <p>Acceso destinado a empleados y administradores autorizados.</p>
+            </div>
+        </section>
+    </div>
+
+    <div class="footer-inferior">
+        <p>&copy; <?= date("Y") ?> Supermercado La Granja. Todos los derechos reservados.</p>
+        <p>Sistema de gestión de inventario</p>
+    </div>
+</footer>
+
+<script>
+(() => {
+    // abrir y cerrar el menu lateral
+    const abrir = document.getElementById("abrirMenu");
+    const cerrar = document.getElementById("cerrarMenu");
+    const fondo = document.getElementById("fondoMenu");
+
+    function mostrarMenu() {
+        document.body.classList.add("menu-abierto");
+        abrir.setAttribute("aria-expanded", "true");
+    }
+    function ocultarMenu() {
+        document.body.classList.remove("menu-abierto");
+        abrir.setAttribute("aria-expanded", "false");
+    }
+
+    if (abrir) abrir.addEventListener("click", mostrarMenu);
+    if (cerrar) cerrar.addEventListener("click", ocultarMenu);
+    if (fondo) fondo.addEventListener("click", ocultarMenu);
+    document.addEventListener("keydown", e => { if (e.key === "Escape") ocultarMenu(); });
+})();
+
+// busqueda de clientes, productos y total
+const campoCliente = document.getElementById("cliente_busqueda");
+const campoCedula = document.getElementById("cedula_cliente");
+const listaClientes = document.getElementById("lista_clientes");
+const estadoCliente = document.getElementById("estado_cliente");
+let consultaClientes = 0;
+
+function formato(valor) {
+    return valor.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 2 });
 }
 
-$conn->close();
-?>
+function generarFactura(codigo) {
+    const marco = document.getElementById("marcoFactura");
+    marco.src = "mov_salida.php?<?= $parametros ?>&factura=" + encodeURIComponent(codigo) + "&t=" + Date.now();
+}
+
+if (campoCliente) {
+    campoCliente.addEventListener("input", async function () {
+        campoCedula.value = "";
+        if (estadoCliente) estadoCliente.textContent = "";
+        const texto = campoCliente.value.trim();
+        consultaClientes++;
+        const actual = consultaClientes;
+
+        if (texto === "") {
+            listaClientes.replaceChildren();
+            return;
+        }
+
+        try {
+            const resp = await fetch("mov_salida.php?<?= $parametros ?>&buscar_cliente=" + encodeURIComponent(texto));
+            if (!resp.ok) return;
+            const clientes = await resp.json();
+            if (actual !== consultaClientes) return;
+
+            listaClientes.replaceChildren();
+            clientes.forEach(c => {
+                const opt = document.createElement("option");
+                opt.value = c.cedula + " - " + c.nombre;
+                listaClientes.appendChild(opt);
+            });
+        } catch (e) { console.error(e); }
+    });
+
+    campoCliente.addEventListener("change", async function () {
+        const texto = campoCliente.value.trim();
+        if (texto === "") return;
+
+        try {
+            const resp = await fetch("mov_salida.php?<?= $parametros ?>&buscar_cliente=" + encodeURIComponent(texto));
+            const clientes = await resp.json();
+            const cliente = clientes.find(c => {
+                const cd = String(c.cedula).trim();
+                const nm = String(c.nombre).trim();
+                return texto === cd || texto.toLowerCase() === nm.toLowerCase() || texto === cd + " - " + nm;
+            });
+
+            if (cliente) {
+                campoCedula.value = String(cliente.cedula);
+                campoCliente.value = cliente.cedula + " - " + cliente.nombre;
+                if (estadoCliente) estadoCliente.textContent = "Cliente verificado: " + cliente.nombre;
+            } else {
+                campoCedula.value = "";
+                if (estadoCliente) estadoCliente.textContent = "Cliente no válido. Elige una opción de las sugerencias.";
+            }
+        } catch (e) { console.error(e); }
+    });
+}
+
+function conectarFila(fila) {
+    const codigo = fila.querySelector(".codigo");
+    const nombre = fila.querySelector(".nombre-producto");
+    const precio = fila.querySelector(".precio");
+    const cantidad = fila.querySelector(".cantidad");
+    const quitar = fila.querySelector(".quitar");
+
+    codigo.addEventListener("change", () => buscarProducto(fila));
+    codigo.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); buscarProducto(fila); }
+    });
+
+    nombre.addEventListener("input", calcularTotal);
+    precio.addEventListener("input", calcularTotal);
+    cantidad.addEventListener("input", calcularTotal);
+
+    quitar.addEventListener("click", () => {
+        fila.remove();
+        calcularTotal();
+    });
+}
+
+function agregarProducto() {
+    const fila = document.createElement("tr");
+    fila.innerHTML = `
+        <td><input class="codigo" type="number" name="cod_producto[]" min="1" required></td>
+        <td><input class="nombre-producto" type="text" name="nombre_producto[]" required></td>
+        <td><input class="precio" type="number" name="precio[]" min="0" step="0.01" required></td>
+        <td><input class="cantidad" type="number" name="cantidad[]" min="1" step="1" value="1" required></td>
+        <td class="subtotal derecha">$0</td>
+        <td><button type="button" class="boton boton-chico boton-eliminar quitar">Quitar</button></td>
+    `;
+    document.getElementById("productos").appendChild(fila);
+    conectarFila(fila);
+    calcularTotal();
+}
+
+async function buscarProducto(fila) {
+    const campoCod = fila.querySelector(".codigo");
+    const campoNom = fila.querySelector(".nombre-producto");
+    const campoPre = fila.querySelector(".precio");
+    const cod = campoCod.value.trim();
+
+    if (cod === "") {
+        campoNom.value = ""; campoPre.value = ""; calcularTotal(); return;
+    }
+
+    try {
+        const resp = await fetch("mov_salida.php?<?= $parametros ?>&producto_codigo=" + encodeURIComponent(cod));
+        const prod = await resp.json();
+
+        if (prod.existe) {
+            campoCod.value = prod.codigo;
+            campoNom.value = prod.nombre;
+            campoPre.value = prod.precio;
+            calcularTotal();
+        } else {
+            campoNom.value = ""; campoPre.value = ""; calcularTotal();
+            alert("No se encontró producto con ese código.");
+        }
+    } catch (e) { console.error(e); }
+}
+
+function calcularTotal() {
+    let total = 0;
+    document.querySelectorAll("#productos tr").forEach(fila => {
+        const precio = parseFloat(fila.querySelector(".precio").value) || 0;
+        const cantidad = parseInt(fila.querySelector(".cantidad").value) || 0;
+        const subtotal = precio * cantidad;
+
+        fila.querySelector(".subtotal").textContent = formato(subtotal);
+        total += subtotal;
+    });
+    const elemTotal = document.getElementById("totalFactura");
+    if (elemTotal) elemTotal.textContent = formato(total);
+}
+
+document.querySelectorAll("#productos tr").forEach(conectarFila);
+if (document.querySelectorAll("#productos tr").length === 0 && document.getElementById("productos")) {
+    agregarProducto();
+}
+calcularTotal();
+</script>
+</body>
+</html>

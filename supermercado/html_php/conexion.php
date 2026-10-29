@@ -1,19 +1,20 @@
 <?php
 
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "supermercado";
+        $servername ="localhost" ;
 
-// Crear conexión
-$conn = new mysqli($servername, $username, $password, $dbname);
+        $username ="root";
+        $password ="";
+        $dbname ="supermercado";
 
-// Verificar conexión
-if ($conn->connect_error) {
-    die("Conexión fallida: " . $conn->connect_error);
-}
+        //crear conexion
+        $conn =  new mysqli($servername,$username,$password,$dbname);
 
-// Para que las tildes y la ñ se guarden y se vean bien
-$conn->set_charset("utf8mb4");
+        //verificar conexion
+        
+        if($conn->connect_error){
+
+            die("Conexion Fallida". $conn->connect_error);
+        }
+
 
 ?>
