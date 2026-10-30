@@ -1,10 +1,7 @@
 <?php
 /* 
-   - EMPLEADO (cargo 2): solo el formulario para registrar
-     una entrada de productos.
-   - ADMINISTRADOR (cargo 1): solo la búsqueda y la tabla de
-     movimientos. El formulario solo le aparece cuando pulsa
-     "Editar". El administrador también puede eliminar.
+   - Empleado (cargo 2): .
+   - Administrador (cargo 1)
     */
 
 session_start();
@@ -46,12 +43,9 @@ $productoTexto = "";
 $productoCodigo = "";
 
 
-/* =====================================================
-   AUTOCOMPLETAR PROVEEDOR Y PRODUCTO
-   El formulario pregunta aquí: "¿qué proveedor o producto
-   coincide con lo que escribió el usuario?" y esta parte
-   responde con una lista (máximo 10) en formato JSON.
-   ===================================================== */
+/* 
+   Autocompletar
+    */
 
 function responderBusqueda($conn, $tabla, $campoCodigo, $textoBuscado)
 {
@@ -123,7 +117,7 @@ if (isset($_GET["buscar_producto"])) {
 }
 
 
-/* AVISO: el empleado no puede borrar ni editar */
+
 
 if ((isset($_GET['borrar']) || isset($_GET['editar'])) && !$esAdmin) {
 
@@ -133,7 +127,7 @@ if ((isset($_GET['borrar']) || isset($_GET['editar'])) && !$esAdmin) {
 }
 
 
-/* BORRAR (solo administrador) */
+/* Borrar (solo administrador) */
 
 if (isset($_GET['borrar']) && $esAdmin) {
 
@@ -165,7 +159,7 @@ if (isset($_GET['borrar']) && $esAdmin) {
 }
 
 
-/* EDITAR (solo administrador) */
+/* Editar (solo administrador) */
 
 if (isset($_GET['editar']) && $esAdmin) {
 
@@ -217,7 +211,7 @@ if (isset($_GET['editar']) && $esAdmin) {
 }
 
 
-/* GUARDAR Y ACTUALIZAR */
+/* Guardar y actualizar */
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
@@ -290,7 +284,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     }
 
 
-    /* ACTUALIZAR */
+    /* Actualizar*/
 
     if ($accion === "actualizar" && $esAdmin) {
 
@@ -324,7 +318,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 }
 
 
-/* BUSCAR */
+/* buscar*/
 
 if (isset($_GET['buscar'])) {
 
@@ -333,7 +327,7 @@ if (isset($_GET['buscar'])) {
 }
 
 
-/* LISTAR MOVIMIENTOS (solo administrador) */
+/* Lista de movimiento(solo administrador) */
 
 if ($esAdmin) {
 
@@ -394,6 +388,11 @@ $resultado = $stmt->get_result();
 
 
 <h2>Movimiento Entrada</h2>
+
+<!-- Botón para volver al menú -->
+<form action="menu.php" method="GET">
+    <button type="submit">Menu Principal</button>
+</form>
 
 
 <?php if ($mensaje != ""): ?>
@@ -649,10 +648,6 @@ $resultado = $stmt->get_result();
 <?php if ($movimiento_editar || !$esAdmin): ?>
 
 <script>
-// =====================================================
-// JAVASCRIPT DEL FORMULARIO
-// (todo esto corre en el navegador, no en el servidor)
-// =====================================================
 
 // Activa el autocompletado en un campo (sirve para proveedor y producto).
 // Devuelve una función que confirma que lo escrito sí existe.
@@ -824,7 +819,7 @@ document.getElementById("formularioEntrada").addEventListener("submit", async fu
 
 <?php if ($esAdmin): ?>
 
-<!-- BUSCAR -->
+
 
 <h3>Buscar Movimiento</h3>
 
@@ -900,10 +895,7 @@ document.getElementById("formularioEntrada").addEventListener("submit", async fu
 
 <br>
 
-<!-- Botón para volver al menú -->
-<form action="menu.php" method="GET">
-    <button type="submit">Menu Principal</button>
-</form>
+
 
 <?php endif; // fin de la tabla del administrador ?>
 

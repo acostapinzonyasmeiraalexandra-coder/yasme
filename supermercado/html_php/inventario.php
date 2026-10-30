@@ -23,7 +23,7 @@ if (isset($_POST["buscar"])) {
 }
 
 
-/* CONSULTAR INVENTARIO */
+/* Consultar Inventario */
 /* Entradas = tabla mov_entrada. Salidas = tabla detalle_salida (la que usa mov_salida.php) */
 
 $sql = "SELECT p.cod_producto, p.nombre, pr.cod_proveedor, pr.nombre AS proveedor,

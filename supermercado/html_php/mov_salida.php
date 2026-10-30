@@ -1,7 +1,7 @@
 <?php
-/* =====================================================
-   0. SESION Y PERMISOS
-   ===================================================== */
+/* 
+   permisos
+    */
 
 session_start();
 
@@ -24,9 +24,9 @@ if ($cargo != "1" && $cargo != "2") {
 $esAdmin = ($cargo == "1");
 
 
-/* =====================================================
-   1. CONEXION A LA BASE DE DATOS
-   ===================================================== */
+/* 
+   conexion base de datos
+  */
 
 // Los errores de MySQL se vuelven excepciones (para el try/catch).
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
@@ -195,9 +195,9 @@ function mostrarFactura($conn, $codigo)
 }
 
 
-/* =====================================================
+/* 
    3. VARIABLES INICIALES
-   ===================================================== */
+    */
 
 $mensaje = "";                    // Texto del aviso.
 $tipoMensaje = "";                // "bien" (verde) o "error" (rojo).
@@ -213,11 +213,9 @@ if (isset($_GET["buscar"])) {
 }
 
 
-/* =====================================================
-   4. AUTOCOMPLETAR PRODUCTOS
-   El formulario pregunta por un codigo y aqui se responde
-   con el nombre y el precio del producto.
-   ===================================================== */
+/* 
+   autocompletar productos
+   */
 
 if (isset($_GET["producto_codigo"])) {
 
@@ -256,9 +254,9 @@ if (isset($_GET["producto_codigo"])) {
 }
 
 
-/* =====================================================
-   5. BUSCAR CLIENTES POR CEDULA O NOMBRE
-   ===================================================== */
+/* 
+   busca clientes
+  */
 
 if (isset($_GET["buscar_cliente"])) {
 
@@ -320,10 +318,9 @@ if (isset($_GET["buscar_cliente"])) {
 }
 
 
-/* =====================================================
-   5B. GENERAR LA FACTURA
-   Se activa cuando la URL trae ?factura=NUMERO
-   ===================================================== */
+/* 
+   generar factura
+   */
 
 if (isset($_GET["factura"])) {
 
@@ -338,10 +335,9 @@ if (isset($_GET["factura"])) {
 }
 
 
-/* =====================================================
-   6. ELIMINAR UN MOVIMIENTO (SOLO ADMINISTRADOR)
-   Se activa cuando la URL trae ?borrar=NUMERO
-   ===================================================== */
+/* 
+  eliminar un movimiento 
+   */
 
 if (isset($_GET["borrar"])) {
 
@@ -399,10 +395,9 @@ if (isset($_GET["mensaje"]) && $_GET["mensaje"] == "eliminado" && $esAdmin) {
 }
 
 
-/* =====================================================
-   7. CARGAR UN MOVIMIENTO PARA EDITAR (SOLO ADMINISTRADOR)
-   Se activa cuando la URL trae ?editar=NUMERO
-   ===================================================== */
+/* 
+  editar movimientos
+    */
 
 if (isset($_GET["editar"])) {
 
@@ -461,10 +456,9 @@ if (isset($_GET["editar"])) {
 }
 
 
-/* =====================================================
-   8. GUARDAR (EMPLEADO) O ACTUALIZAR (ADMINISTRADOR)
-   Se activa cuando se envia el formulario.
-   ===================================================== */
+/* 
+  guardar y actualizar
+    */
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
@@ -535,11 +529,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 throw new Exception("El administrador no registra salidas nuevas.");
             }
 
-            // Iniciamos la transaccion (todo o nada).
+            
             $conn->begin_transaction();
             $transaccionIniciada = true;
 
-            // --- Comprobar que el cliente exista ---
+            //  Comprobar que el cliente exista 
             $stmt = $conn->prepare(
                 "SELECT cedula_cliente FROM cliente
                  WHERE CAST(cedula_cliente AS CHAR) = ?"
@@ -556,7 +550,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 );
             }
 
-            // --- ACTUALIZAR una factura que ya existe ---
+            // actualizar una factura que ya existe
             if ($accion == "actualizar") {
 
                 if ($codigo <= 0) {
@@ -711,7 +705,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $consultaStock->close();
             $stmtDetalle->close();
 
-            // Todo salio bien: confirmamos los cambios.
+            //  confirmamos los cambios.
             $conn->commit();
             $transaccionIniciada = false;
 
@@ -737,7 +731,7 @@ if (isset($_GET["guardado"]) && $tipoMensaje != "error") {
 }
 
 // Codigo del movimiento recien guardado (para el boton "Generar factura").
-// Solo el empleado lo usa; el administrador no ve ese boton.
+
 $codigoRecienGuardado = 0;
 
 if (!$esAdmin && isset($_GET["guardado"]) && $tipoMensaje == "bien") {
@@ -745,13 +739,11 @@ if (!$esAdmin && isset($_GET["guardado"]) && $tipoMensaje == "bien") {
 }
 
 
-/* =====================================================
-   9. CONSULTAS PARA LAS TABLAS (SOLO ADMINISTRADOR)
-   ===================================================== */
+/* consultar tablas */
 
 if ($esAdmin) {
 
-    // ---------- Tabla de movimientos registrados ----------
+    // Tabla de movimientos registrados 
 
     $sql = "SELECT
                 f.cod_movimiento,
@@ -797,7 +789,7 @@ if ($esAdmin) {
     $stmtLista->execute();
     $resultado = $stmtLista->get_result();
 
-    // ---------- Tabla de resumen por producto ----------
+    // Tabla de resumen por producto 
 
     $sqlResumen = "SELECT
                         d.cod_producto,
@@ -813,9 +805,6 @@ if ($esAdmin) {
 }
 
 
-/* =====================================================
-   10. DATOS PARA DIBUJAR LA PAGINA
-   ===================================================== */
 
 // Empleado: siempre ve el formulario.
 // Administrador: solo cuando esta editando.
@@ -837,7 +826,12 @@ if ($factura_editar) {
 </head>
 <body>
 
+ 
     <h2>MOVIMIENTO DE SALIDA</h2>
+    <form action="menu.php" method="GET">
+        <button type="submit">Menú principal</button>
+    </form>
+
 
     <!-- Mensaje: verde si salio bien, rojo si es error o eliminado -->
     <?php if ($mensaje != ""): ?>
@@ -853,9 +847,7 @@ if ($factura_editar) {
     <?php endif; ?>
 
 
-    <!-- =====================================================
-         FORMULARIO (empleado siempre; administrador al editar)
-         ===================================================== -->
+    <!-- formulario empleado -->
     <?php if ($mostrarFormulario): ?>
 
         <h3>
@@ -1009,9 +1001,9 @@ if ($factura_editar) {
         </form>
 
         <script>
-            // =====================================================
+            
             // JAVASCRIPT DEL FORMULARIO (corre en el navegador)
-            // =====================================================
+            
 
             // Elementos de la pagina que vamos a usar.
             const campoCliente = document.getElementById("cliente_busqueda");
@@ -1041,7 +1033,7 @@ if ($factura_editar) {
             }
 
 
-            // ---------- Sugerencias de clientes mientras se escribe ----------
+            //  Sugerencias de clientes mientras se escribe 
             campoCliente.addEventListener("input", async function () {
 
                 // Si cambia el texto, la cedula elegida ya no sirve.
@@ -1088,7 +1080,7 @@ if ($factura_editar) {
             });
 
 
-            // ---------- Confirmar que el cliente escrito si existe ----------
+            //  Confirmar que el cliente escrito si existe 
             // Devuelve true si el cliente es valido y false si no.
             async function resolverCliente() {
                 const texto = campoCliente.value.trim();
@@ -1142,7 +1134,7 @@ if ($factura_editar) {
             campoCliente.addEventListener("change", resolverCliente);
 
 
-            // ---------- Filas de productos ----------
+            //  Filas de productos 
 
             // Le da vida a una fila: buscar producto, recalcular y quitar.
             function conectarFila(fila) {
@@ -1443,10 +1435,7 @@ if ($factura_editar) {
             style="display: none;"></iframe>
 
     <!-- Boton para volver al menu -->
-    <form action="menu.php" method="GET">
-        <button type="submit">Menú principal</button>
-    </form>
-
+   
 </body>
 </html>
 <?php

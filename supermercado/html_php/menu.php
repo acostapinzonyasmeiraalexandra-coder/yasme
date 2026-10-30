@@ -63,8 +63,8 @@ if (isset($_POST["pro"])) {
             <button type="submit" name="cli">Cliente</button>
             <button type="submit" name="inv">Inventario</button><br><br>
             <button type="submit" name="editar">Modificar usuario</button>
+            <button type="submit" name="reportes">Reportes</button><br><br>
             <button type="submit" name="salir">Cerrar sesión</button>
-            <button type="submit" name="reportes">Reportes</button>
            
         </form>
         
